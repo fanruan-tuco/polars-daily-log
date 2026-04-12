@@ -7,7 +7,7 @@ from .app import Application
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Auto Daily Log")
+    parser = argparse.ArgumentParser(description="Polars Daily Log")
     parser.add_argument("--config", default="config.yaml", help="Config file path")
     parser.add_argument("--port", type=int, help="Override server port")
     args = parser.parse_args()

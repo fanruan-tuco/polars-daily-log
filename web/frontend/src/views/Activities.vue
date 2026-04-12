@@ -90,7 +90,7 @@
                 <template #default="{ row }">
                   <el-popconfirm title="Delete?" @confirm="deleteOne(row.id)">
                     <template #reference>
-                      <el-button size="small" text type="danger">
+                      <el-button size="small" text style="color: #c0c4cc">
                         <el-icon><Delete /></el-icon>
                       </el-button>
                     </template>

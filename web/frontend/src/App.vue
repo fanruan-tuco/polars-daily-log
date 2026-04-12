@@ -4,10 +4,8 @@
     <nav class="top-nav">
       <div class="nav-inner">
         <router-link to="/" class="nav-logo">
-          <span class="logo-icon">
-            <el-icon :size="20"><Odometer /></el-icon>
-          </span>
-          <span class="logo-text">Auto Daily Log</span>
+          <img src="/logo.png" alt="Polars" class="logo-img" />
+          <span class="logo-text">Polars Daily Log</span>
         </router-link>
 
         <div class="nav-links">
@@ -89,10 +87,10 @@ function isActive(path) {
   flex-shrink: 0;
 }
 
-.logo-icon {
-  display: flex;
-  align-items: center;
-  color: var(--accent);
+.logo-img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
 }
 
 .logo-text {
