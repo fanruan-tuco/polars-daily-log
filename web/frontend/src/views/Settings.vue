@@ -133,7 +133,7 @@
           <p class="card-hint">
             可用变量：<code>{date}</code> 日期、<code>{jira_issues}</code> 活跃任务列表、<code>{git_commits}</code> 当天提交记录、<code>{activities}</code> 活动采集记录
           </p>
-          <el-input v-model="settings.summarize_prompt" type="textarea" :rows="12" :placeholder="defaultPrompts.summarize" />
+          <el-input v-model="settings.summarize_prompt" type="textarea" :rows="12" :placeholder="defaultPrompts.summarize_prompt" />
         </div>
 
         <div class="prompt-section">
@@ -145,7 +145,7 @@
           <p class="card-hint">
             可用变量：<code>{date}</code> 日期、<code>{issue_key}</code> 任务编号、<code>{issue_summary}</code> 任务标题、<code>{time_spent_hours}</code> 工时、<code>{summary}</code> 日志内容、<code>{git_commits}</code> 关联提交
           </p>
-          <el-input v-model="settings.auto_approve_prompt" type="textarea" :rows="12" :placeholder="defaultPrompts.auto_approve" />
+          <el-input v-model="settings.auto_approve_prompt" type="textarea" :rows="12" :placeholder="defaultPrompts.auto_approve_prompt" />
         </div>
 
         <div class="prompt-section">
@@ -157,7 +157,7 @@
           <p class="card-hint">
             可用变量：<code>{period_start}</code> 开始日期、<code>{period_end}</code> 结束日期、<code>{period_type}</code> 报告类型（周报/月报）、<code>{daily_logs}</code> 每日日志内容
           </p>
-          <el-input v-model="settings.period_summary_prompt" type="textarea" :rows="12" :placeholder="defaultPrompts.period_summary" />
+          <el-input v-model="settings.period_summary_prompt" type="textarea" :rows="12" :placeholder="defaultPrompts.period_summary_prompt" />
         </div>
       </div>
     </div>
@@ -221,50 +221,11 @@ const settings = ref({
 const gitRepos = ref([])
 const newRepo = ref({ path: '', author_email: '' })
 
-const defaultPrompts = {
-  summarize: `你是工作日志助手。以下是用户今天的工作数据：
-
-【日期】{date}
-【活跃 Jira 任务】
-{jira_issues}
-【Git Commits】
-{git_commits}
-【活动记录】
-{activities}
-
-请根据以上数据总结今天的工作内容，生成工作日志。
-规则：
-- 如果有活跃的 Jira 任务，为每个相关任务生成一条日志，无法归类的放入 "OTHER"
-- 如果没有 Jira 任务，汇总为一条日志，issue_key 使用 "ALL"
-- 每条日志包含工时（精确到 0.5h）和具体做了什么（中文，50-150字）
-
-以 JSON 数组格式返回：
-[{"issue_key": "PROJ-101", "time_spent_hours": 3.5, "summary": "..."}]`,
-
-  auto_approve: `你是工作日志审批助手。请检查以下工作日志草稿：
-
-【日期】{date}
-【Jira 任务】{issue_key}: {issue_summary}
-【工时】{time_spent_hours} 小时
-【日志内容】{summary}
-【关联 Git Commits】{git_commits}
-
-请判断：1. 内容是否与任务描述一致？2. 工时是否合理？3. 描述是否清晰具体？
-
-合格返回 {"approved": true}
-不合格返回 {"approved": false, "reason": "原因"}`,
-
-  period_summary: `你是工作周报/月报助手。以下是 {period_start} ~ {period_end} 的每日日志：
-
-{daily_logs}
-
-请生成一份{period_type}总结：
-1. 按工作方向分类汇总（功能开发、Bug修复、会议沟通等）
-2. 每个方向列出具体做了什么
-3. 总结工作亮点和主要成果
-4. 统计总工时
-5. 中文，200-500字，纯文本格式`,
-}
+const defaultPrompts = ref({
+  summarize_prompt: '',
+  auto_approve_prompt: '',
+  period_summary_prompt: '',
+})
 
 async function loadSettings() {
   const res = await api.getSettings()
@@ -317,6 +278,13 @@ async function checkLLMKey() {
   }
 }
 
+async function loadDefaultPrompts() {
+  try {
+    const res = await api.getDefaultPrompts()
+    defaultPrompts.value = res.data
+  } catch (e) { /* ignore */ }
+}
+
 async function saveAll() {
   for (const [key, value] of Object.entries(settings.value)) {
     await api.putSetting(key, String(value))
@@ -324,7 +292,7 @@ async function saveAll() {
   ElMessage.success('Settings saved')
 }
 
-onMounted(() => { loadSettings(); loadGitRepos() })
+onMounted(() => { loadSettings(); loadGitRepos(); loadDefaultPrompts() })
 </script>
 
 <style scoped>

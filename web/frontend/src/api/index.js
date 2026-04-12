@@ -20,6 +20,7 @@ export default {
   updateIssue: (key, data) => api.patch(`/issues/${key}`, data),
   deleteIssue: (key) => api.delete(`/issues/${key}`),
   getSettings: () => api.get('/settings'),
+  getDefaultPrompts: () => api.get('/settings/default-prompts'),
   getSetting: (key) => api.get(`/settings/${key}`),
   putSetting: (key, value) => api.put(`/settings/${key}`, { value }),
   checkLLMKey: (engine, apiKey, model = '', baseUrl = '') =>

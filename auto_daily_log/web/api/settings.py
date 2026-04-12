@@ -71,6 +71,21 @@ async def check_llm_key(body: LLMCheckRequest):
     except Exception as e:
         return {"valid": False, "message": f"Error: {str(e)}"}
 
+@router.get("/settings/default-prompts")
+async def get_default_prompts():
+    """Return all default prompt templates — single source of truth."""
+    from ...summarizer.prompt import (
+        DEFAULT_SUMMARIZE_PROMPT,
+        DEFAULT_AUTO_APPROVE_PROMPT,
+        DEFAULT_PERIOD_SUMMARY_PROMPT,
+    )
+    return {
+        "summarize_prompt": DEFAULT_SUMMARIZE_PROMPT,
+        "auto_approve_prompt": DEFAULT_AUTO_APPROVE_PROMPT,
+        "period_summary_prompt": DEFAULT_PERIOD_SUMMARY_PROMPT,
+    }
+
+
 @router.get("/settings")
 async def list_settings(request: Request):
     db = request.app.state.db
