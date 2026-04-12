@@ -1,18 +1,34 @@
 <template>
-  <div>
-    <h2 style="margin-bottom: 20px">Settings</h2>
+  <div class="settings-page">
+    <div class="page-header">
+      <h2>Settings</h2>
+    </div>
 
-    <el-tabs v-model="activeTab">
-      <el-tab-pane label="Monitor" name="monitor">
-        <el-form label-width="200px" style="max-width: 600px">
-          <el-form-item label="Sampling Interval (sec)">
+    <!-- Tab Navigation -->
+    <div class="tab-nav">
+      <button
+        v-for="tab in tabs"
+        :key="tab.name"
+        :class="['tab-btn', { active: activeTab === tab.name }]"
+        @click="activeTab = tab.name"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
+
+    <!-- Monitor Tab -->
+    <div v-show="activeTab === 'monitor'" class="tab-content">
+      <div class="settings-card">
+        <h4 class="card-title">Monitor Configuration</h4>
+        <el-form label-position="top" class="settings-form">
+          <el-form-item label="Sampling Interval (seconds)">
             <el-input-number v-model="settings.monitor_interval_sec" :min="10" :max="300" />
           </el-form-item>
           <el-form-item label="OCR Enabled">
             <el-switch v-model="settings.monitor_ocr_enabled" />
           </el-form-item>
           <el-form-item label="OCR Engine">
-            <el-select v-model="settings.monitor_ocr_engine">
+            <el-select v-model="settings.monitor_ocr_engine" style="width: 100%">
               <el-option label="Auto" value="auto" />
               <el-option label="Vision (macOS)" value="vision" />
               <el-option label="WinOCR (Windows)" value="winocr" />
@@ -23,14 +39,19 @@
             <el-input-number v-model="settings.monitor_screenshot_retention_days" :min="1" :max="90" />
           </el-form-item>
         </el-form>
-      </el-tab-pane>
+      </div>
+    </div>
 
-      <el-tab-pane label="Git Repos" name="git">
-        <p style="color: #909399; margin-bottom: 16px">Configure git repositories to track commits from.</p>
-        <el-table :data="gitRepos" stripe style="margin-bottom: 16px">
+    <!-- Git Repos Tab -->
+    <div v-show="activeTab === 'git'" class="tab-content">
+      <div class="settings-card">
+        <h4 class="card-title">Git Repositories</h4>
+        <p class="card-description">Configure git repositories to track commits from.</p>
+
+        <el-table :data="gitRepos" style="margin-bottom: 20px">
           <el-table-column prop="path" label="Path" />
           <el-table-column prop="author_email" label="Author Email" />
-          <el-table-column label="Actions" width="80">
+          <el-table-column label="" width="80" align="center">
             <template #default="{ row }">
               <el-button text type="danger" @click="removeRepo(row.id)">
                 <el-icon><Delete /></el-icon>
@@ -38,21 +59,20 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-form inline>
-          <el-form-item>
-            <el-input v-model="newRepo.path" placeholder="/path/to/repo" />
-          </el-form-item>
-          <el-form-item>
-            <el-input v-model="newRepo.author_email" placeholder="email@example.com" />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="addRepo">Add</el-button>
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
 
-      <el-tab-pane label="Jira" name="jira">
-        <el-form label-width="160px" style="max-width: 600px">
+        <div class="add-repo-form">
+          <el-input v-model="newRepo.path" placeholder="/path/to/repo" class="repo-input" />
+          <el-input v-model="newRepo.author_email" placeholder="email@example.com" class="repo-input" />
+          <el-button type="primary" round @click="addRepo">Add</el-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Jira Tab -->
+    <div v-show="activeTab === 'jira'" class="tab-content">
+      <div class="settings-card">
+        <h4 class="card-title">Jira Connection</h4>
+        <el-form label-position="top" class="settings-form">
           <el-form-item label="Server URL">
             <el-input v-model="settings.jira_server_url" placeholder="https://jira.example.com" />
           </el-form-item>
@@ -60,12 +80,16 @@
             <el-input v-model="settings.jira_pat" type="password" show-password />
           </el-form-item>
         </el-form>
-      </el-tab-pane>
+      </div>
+    </div>
 
-      <el-tab-pane label="LLM" name="llm">
-        <el-form label-width="160px" style="max-width: 600px">
+    <!-- LLM Tab -->
+    <div v-show="activeTab === 'llm'" class="tab-content">
+      <div class="settings-card">
+        <h4 class="card-title">LLM Configuration</h4>
+        <el-form label-position="top" class="settings-form">
           <el-form-item label="Engine">
-            <el-select v-model="settings.llm_engine">
+            <el-select v-model="settings.llm_engine" style="width: 100%">
               <el-option label="Kimi (Moonshot)" value="kimi" />
               <el-option label="OpenAI" value="openai" />
               <el-option label="Ollama" value="ollama" />
@@ -82,36 +106,48 @@
             <el-input v-model="settings.llm_base_url" />
           </el-form-item>
         </el-form>
-      </el-tab-pane>
+      </div>
+    </div>
 
-      <el-tab-pane label="Prompt 模板" name="prompts">
-        <el-alert type="info" :closable="false" style="margin-bottom: 20px">
-          Prompt 模板用于控制 LLM 生成工作日志的行为。修改后点击底部「保存」按钮生效。
+    <!-- Prompts Tab -->
+    <div v-show="activeTab === 'prompts'" class="tab-content">
+      <div class="settings-card">
+        <el-alert type="info" :closable="false" style="margin-bottom: 24px">
+          Prompt templates control how the LLM generates work logs. Changes take effect after saving.
         </el-alert>
 
-        <h4>日志生成 Prompt</h4>
-        <p style="color: #606266; font-size: 13px; margin-bottom: 4px">
-          <strong>用途：</strong>每天定时触发时，系统将当天的活动记录、Git commits 和 Jira 任务列表填入此模板，
-          发送给 LLM 生成工作日志草稿。每个 Jira 任务会生成一条包含工时和摘要的草稿。
-        </p>
-        <p style="color: #909399; font-size: 12px; margin-bottom: 8px">
-          可用变量：<code>{date}</code> 日期、<code>{jira_issues}</code> 活跃任务列表、<code>{git_commits}</code> 当天提交记录、<code>{activities}</code> 活动采集记录
-        </p>
-        <el-input v-model="settings.summarize_prompt" type="textarea" :rows="12" />
+        <div class="prompt-section">
+          <h4 class="card-title">Log Generation Prompt</h4>
+          <p class="card-description">
+            <strong>Purpose:</strong> When the daily trigger fires, the system fills this template with the day's activity records,
+            Git commits, and Jira task list, then sends it to the LLM to generate work log drafts.
+          </p>
+          <p class="card-hint">
+            Available variables: <code>{date}</code>, <code>{jira_issues}</code>, <code>{git_commits}</code>, <code>{activities}</code>
+          </p>
+          <el-input v-model="settings.summarize_prompt" type="textarea" :rows="12" />
+        </div>
 
-        <h4 style="margin-top: 24px">自动审批 Prompt</h4>
-        <p style="color: #606266; font-size: 13px; margin-bottom: 4px">
-          <strong>用途：</strong>日志草稿生成后，若超过设定时间（默认 30 分钟）无人审批，系统会将每条草稿发送给 LLM，
-          由 LLM 判断日志质量是否合格。合格则自动通过并提交到 Jira，不合格则保持待审批状态等待人工处理。
-        </p>
-        <p style="color: #909399; font-size: 12px; margin-bottom: 8px">
-          可用变量：<code>{date}</code> 日期、<code>{issue_key}</code> 任务编号、<code>{issue_summary}</code> 任务标题、<code>{time_spent_hours}</code> 工时、<code>{summary}</code> 日志内容、<code>{git_commits}</code> 关联提交
-        </p>
-        <el-input v-model="settings.auto_approve_prompt" type="textarea" :rows="12" />
-      </el-tab-pane>
+        <div class="prompt-section">
+          <h4 class="card-title">Auto-Approve Prompt</h4>
+          <p class="card-description">
+            <strong>Purpose:</strong> After draft generation, if no one reviews within the timeout (default 30 min),
+            the system sends each draft to the LLM for quality assessment. Passing drafts are auto-approved and submitted to Jira.
+          </p>
+          <p class="card-hint">
+            Available variables: <code>{date}</code>, <code>{issue_key}</code>, <code>{issue_summary}</code>,
+            <code>{time_spent_hours}</code>, <code>{summary}</code>, <code>{git_commits}</code>
+          </p>
+          <el-input v-model="settings.auto_approve_prompt" type="textarea" :rows="12" />
+        </div>
+      </div>
+    </div>
 
-      <el-tab-pane label="Scheduler" name="scheduler">
-        <el-form label-width="200px" style="max-width: 600px">
+    <!-- Scheduler Tab -->
+    <div v-show="activeTab === 'scheduler'" class="tab-content">
+      <div class="settings-card">
+        <h4 class="card-title">Scheduler</h4>
+        <el-form label-position="top" class="settings-form">
           <el-form-item label="Daily Trigger Enabled">
             <el-switch v-model="settings.scheduler_enabled" />
           </el-form-item>
@@ -121,15 +157,18 @@
           <el-form-item label="Auto-Approve Enabled">
             <el-switch v-model="settings.auto_approve_enabled" />
           </el-form-item>
-          <el-form-item label="Auto-Approve Timeout (min)">
+          <el-form-item label="Auto-Approve Timeout (minutes)">
             <el-input-number v-model="settings.auto_approve_timeout_min" :min="5" :max="120" />
           </el-form-item>
         </el-form>
-      </el-tab-pane>
-    </el-tabs>
+      </div>
+    </div>
 
-    <div style="margin-top: 20px">
-      <el-button type="primary" @click="saveAll">Save All Settings</el-button>
+    <!-- Save Button -->
+    <div class="save-bar">
+      <el-button type="primary" round size="large" @click="saveAll">
+        Save All Settings
+      </el-button>
     </div>
   </div>
 </template>
@@ -140,6 +179,15 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 
 const activeTab = ref('monitor')
+const tabs = [
+  { name: 'monitor', label: 'Monitor' },
+  { name: 'git', label: 'Git Repos' },
+  { name: 'jira', label: 'Jira' },
+  { name: 'llm', label: 'LLM' },
+  { name: 'prompts', label: 'Prompts' },
+  { name: 'scheduler', label: 'Scheduler' },
+]
+
 const settings = ref({
   monitor_interval_sec: 30, monitor_ocr_enabled: true, monitor_ocr_engine: 'auto',
   monitor_screenshot_retention_days: 7, jira_server_url: '', jira_pat: '',
@@ -189,3 +237,121 @@ async function saveAll() {
 
 onMounted(() => { loadSettings(); loadGitRepos() })
 </script>
+
+<style scoped>
+.settings-page {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.tab-nav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.tab-btn {
+  padding: 8px 18px;
+  border: none;
+  background: transparent;
+  border-radius: 980px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font);
+}
+
+.tab-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  background: var(--text-primary);
+  color: #fff;
+}
+
+.tab-content {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.settings-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+
+.card-title {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.card-description {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.card-hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+}
+
+.card-hint code {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: "SF Mono", Menlo, Monaco, monospace;
+}
+
+.settings-form {
+  max-width: 500px;
+  margin-top: 20px;
+}
+
+.settings-form .el-form-item {
+  margin-bottom: 24px;
+}
+
+.prompt-section {
+  margin-bottom: 32px;
+}
+
+.prompt-section:last-child {
+  margin-bottom: 0;
+}
+
+.add-repo-form {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.repo-input {
+  flex: 1;
+}
+
+.save-bar {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+</style>

@@ -1,40 +1,142 @@
 <template>
-  <el-container style="min-height: 100vh">
-    <el-aside width="200px" style="background: #304156">
-      <div style="padding: 20px; color: #fff; font-size: 16px; font-weight: bold">
-        Auto Daily Log
+  <div class="app-layout">
+    <!-- Top Navigation -->
+    <nav class="top-nav">
+      <div class="nav-inner">
+        <router-link to="/" class="nav-logo">
+          <span class="logo-icon">
+            <el-icon :size="20"><Odometer /></el-icon>
+          </span>
+          <span class="logo-text">Auto Daily Log</span>
+        </router-link>
+
+        <div class="nav-links">
+          <router-link
+            v-for="link in navLinks"
+            :key="link.path"
+            :to="link.path"
+            class="nav-link"
+            :class="{ active: isActive(link.path) }"
+          >
+            {{ link.label }}
+          </router-link>
+        </div>
+
+        <div class="nav-spacer"></div>
       </div>
-      <el-menu
-        :default-active="$route.path"
-        router
-        background-color="#304156"
-        text-color="#bfcbd9"
-        active-text-color="#409EFF"
-      >
-        <el-menu-item index="/">
-          <el-icon><Odometer /></el-icon>
-          <span>Dashboard</span>
-        </el-menu-item>
-        <el-menu-item index="/activities">
-          <el-icon><Monitor /></el-icon>
-          <span>Activities</span>
-        </el-menu-item>
-        <el-menu-item index="/worklogs">
-          <el-icon><Document /></el-icon>
-          <span>Worklogs</span>
-        </el-menu-item>
-        <el-menu-item index="/issues">
-          <el-icon><Tickets /></el-icon>
-          <span>Issues</span>
-        </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <span>Settings</span>
-        </el-menu-item>
-      </el-menu>
-    </el-aside>
-    <el-main>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
       <router-view />
-    </el-main>
-  </el-container>
+    </main>
+  </div>
 </template>
+
+<script setup>
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+
+const navLinks = [
+  { path: '/', label: 'Dashboard' },
+  { path: '/activities', label: 'Activities' },
+  { path: '/worklogs', label: 'Worklogs' },
+  { path: '/issues', label: 'Issues' },
+  { path: '/settings', label: 'Settings' },
+]
+
+function isActive(path) {
+  if (path === '/') return route.path === '/'
+  return route.path.startsWith(path)
+}
+</script>
+
+<style scoped>
+.app-layout {
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.top-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--border);
+  height: 52px;
+}
+
+.nav-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+}
+
+.nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.logo-icon {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+.logo-text {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 auto;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 6px 16px;
+  border-radius: 980px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.nav-link:hover {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.nav-link.active {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.nav-spacer {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.main-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 84px 24px 48px;
+}
+</style>
