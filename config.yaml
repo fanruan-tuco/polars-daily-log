@@ -10,6 +10,9 @@ monitor:
   privacy:
     blocked_apps: []
     blocked_urls: []
+  phash_enabled: true
+  phash_threshold: 10
+  idle_threshold_sec: 180
 
 git:
   repos: []
@@ -42,6 +45,11 @@ scheduler:
 auto_approve:
   enabled: true
   timeout_min: 30
+
+embedding:
+  enabled: true
+  model: ""
+  dimensions: 1536
 
 system:
   language: "zh"

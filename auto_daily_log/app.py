@@ -10,6 +10,9 @@ from .models.database import Database
 from .monitor.service import MonitorService
 from .scheduler.jobs import DailyWorkflow
 from .summarizer.engine import get_llm_engine
+from .search.embedding import get_embedding_engine
+from .search.searcher import Searcher
+from .search.indexer import Indexer
 from .web.app import create_app
 
 
@@ -23,7 +26,7 @@ class Application:
     async def _init_db(self) -> None:
         db_path = Path.home() / ".auto_daily_log" / "data.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = Database(db_path)
+        self.db = Database(db_path, embedding_dimensions=self.config.embedding.dimensions)
         await self.db.initialize()
 
     async def _init_monitor(self) -> None:
@@ -42,6 +45,14 @@ class Application:
             workflow = DailyWorkflow(self.db, engine, self.config.auto_approve)
             await workflow.run_daily_summary()
 
+            # Index today's data for search
+            emb_engine = get_embedding_engine(self.config.llm, self.config.embedding)
+            if emb_engine:
+                indexer = Indexer(self.db, emb_engine)
+                today = datetime.now().strftime("%Y-%m-%d")
+                await indexer.index_activities(today)
+                await indexer.index_commits(today)
+
             if self.config.auto_approve.enabled:
                 timeout = self.config.auto_approve.timeout_min * 60
                 await asyncio.sleep(timeout)
@@ -59,6 +70,11 @@ class Application:
         self._init_scheduler()
 
         app = create_app(self.db)
+
+        # Attach searcher to app state if embedding is enabled
+        emb_engine = get_embedding_engine(self.config.llm, self.config.embedding)
+        if emb_engine:
+            app.state.searcher = Searcher(self.db, emb_engine)
 
         monitor_task = asyncio.create_task(self.monitor.start())
 
