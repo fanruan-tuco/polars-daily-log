@@ -3,12 +3,12 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px">
       <h2 class="page-title">My Logs</h2>
       <div style="display: flex; gap: 8px; align-items: center">
-        <el-button type="primary" round @click="generate('daily')">总结当天</el-button>
-        <el-button round @click="generate('weekly')">总结这周</el-button>
-        <el-button round @click="generate('monthly')">总结当月</el-button>
+        <el-button type="primary" round :disabled="generating" @click="generate('daily')">总结当天</el-button>
+        <el-button round :disabled="generating" @click="generate('weekly')">总结这周</el-button>
+        <el-button round :disabled="generating" @click="generate('monthly')">总结当月</el-button>
         <el-popover trigger="click" :width="300">
           <template #reference>
-            <el-button round>自定义</el-button>
+            <el-button round :disabled="generating">自定义</el-button>
           </template>
           <div>
             <p style="margin-bottom: 8px; font-size: 13px; color: var(--text-secondary)">选择日期范围</p>
@@ -20,11 +20,22 @@
               end-placeholder="结束日期"
               style="width: 100%; margin-bottom: 12px"
             />
-            <el-button type="primary" size="small" round :disabled="!customRange || customRange.length < 2" @click="generateCustom" style="width: 100%">
+            <el-button type="primary" size="small" round :disabled="!customRange || customRange.length < 2 || generating" @click="generateCustom" style="width: 100%">
               生成总结
             </el-button>
           </div>
         </el-popover>
+      </div>
+    </div>
+
+    <!-- Generating overlay -->
+    <div v-if="generating" class="generating-overlay">
+      <div class="generating-card">
+        <div class="generating-spinner"></div>
+        <div class="generating-text">{{ generatingText }}</div>
+        <div class="generating-dots">
+          <span v-for="i in 3" :key="i" class="dot" :style="{ animationDelay: `${(i - 1) * 0.3}s` }"></span>
+        </div>
       </div>
     </div>
 
@@ -134,6 +145,7 @@ const auditLogs = ref([])
 const activeTag = ref('')
 const customRange = ref(null)
 const generating = ref(false)
+const generatingText = ref('')
 
 const tagFilters = [
   { label: '全部', value: '' },
@@ -172,9 +184,9 @@ async function filterByTag(tag) {
 }
 
 async function generate(type, startDate = null, endDate = null) {
-  generating.value = true
   try {
-    // Check if same period already exists
+    // Check if same period already exists (before showing loading)
+    generatingText.value = '检查是否已有记录...'
     const check = await api.checkPeriodExists(type, startDate, endDate)
     if (check.data.exists) {
       const period = check.data.period_start === check.data.period_end
@@ -186,15 +198,42 @@ async function generate(type, startDate = null, endDate = null) {
         { confirmButtonText: '覆盖', cancelButtonText: '取消', type: 'warning' }
       )
     }
-    await api.generateSummary(type, startDate, endDate, true)
-    ElMessage.success(`${tagLabel(type)}总结已生成`)
-    activeTag.value = type
-    await loadDrafts()
+
+    // Now start generating with loading state
+    generating.value = true
+    const steps = {
+      daily: ['正在采集 Git 提交记录...', '正在分析活动数据...', '正在调用 AI 生成日志...', '正在保存草稿...'],
+      weekly: ['正在读取本周每日日志...', '正在调用 AI 生成周报...', '正在保存...'],
+      monthly: ['正在读取本月每日日志...', '正在调用 AI 生成月报...', '正在保存...'],
+      custom: ['正在读取指定周期日志...', '正在调用 AI 生成总结...', '正在保存...'],
+    }
+    const typeSteps = steps[type] || steps.daily
+    let stepIndex = 0
+    generatingText.value = typeSteps[0]
+    const timer = setInterval(() => {
+      stepIndex++
+      if (stepIndex < typeSteps.length) {
+        generatingText.value = typeSteps[stepIndex]
+      }
+    }, 2000)
+
+    try {
+      await api.generateSummary(type, startDate, endDate, true)
+      clearInterval(timer)
+      generatingText.value = '生成完成!'
+      await new Promise(r => setTimeout(r, 500))
+      ElMessage.success(`${tagLabel(type)}总结已生成`)
+      activeTag.value = type
+      await loadDrafts()
+    } finally {
+      clearInterval(timer)
+    }
   } catch (e) {
     if (e === 'cancel' || e?.toString?.().includes('cancel')) return
     ElMessage.error(e.response?.data?.detail || '生成失败')
   } finally {
     generating.value = false
+    generatingText.value = ''
   }
 }
 
@@ -307,4 +346,72 @@ onMounted(loadDrafts)
 .status-submitted { background: #e3f2fd; color: #1565c0; }
 .status-rejected, .status-auto_rejected { background: #ffebee; color: #c62828; }
 .status-archived { background: #f5f5f5; color: #9e9e9e; }
+
+/* Generating overlay */
+.generating-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(245, 245, 247, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+.generating-card {
+  background: var(--surface, #fff);
+  border-radius: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  padding: 48px 60px;
+  text-align: center;
+  animation: slideUp 0.3s ease;
+}
+.generating-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border, rgba(0,0,0,0.08));
+  border-top-color: var(--accent, #0071e3);
+  border-radius: 50%;
+  margin: 0 auto 20px;
+  animation: spin 0.8s linear infinite;
+}
+.generating-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary, #1d1d1f);
+  margin-bottom: 16px;
+  min-width: 200px;
+  transition: opacity 0.3s;
+}
+.generating-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #0071e3);
+  animation: bounce 1.2s ease-in-out infinite;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-8px); opacity: 1; }
+}
 </style>
