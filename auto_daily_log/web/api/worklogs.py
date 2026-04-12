@@ -103,28 +103,31 @@ async def generate_summary(body: GenerateRequest, request: Request):
 
 
 async def _generate_daily(db, request, today, start, end):
-    """Daily: use LLM Summarizer to generate per-issue worklog drafts."""
-    # Try to use LLM engine from app state
+    """Daily: use LLM Summarizer to generate per-issue worklog drafts. Falls back to raw data if LLM fails."""
     llm_engine = getattr(request.app.state, "_llm_engine", None)
 
     if llm_engine:
-        from ...summarizer.summarizer import WorklogSummarizer
-        from ...collector.git_collector import GitCollector
+        try:
+            from ...summarizer.summarizer import WorklogSummarizer
+            from ...collector.git_collector import GitCollector
 
-        collector = GitCollector(db)
-        await collector.collect_today()
-        summarizer = WorklogSummarizer(db, llm_engine)
-        drafts = await summarizer.generate_drafts(start)
+            collector = GitCollector(db)
+            await collector.collect_today()
+            summarizer = WorklogSummarizer(db, llm_engine)
+            drafts = await summarizer.generate_drafts(start)
 
-        # Update the generated drafts with tag and period fields
-        for d in drafts:
-            await db.execute(
-                "UPDATE worklog_drafts SET tag = 'daily', period_start = ?, period_end = ? WHERE id = ?",
-                (start, end, d["id"]),
-            )
+            for d in drafts:
+                await db.execute(
+                    "UPDATE worklog_drafts SET tag = 'daily', period_start = ?, period_end = ? WHERE id = ?",
+                    (start, end, d["id"]),
+                )
 
-        return {"ids": [d["id"] for d in drafts], "tag": "daily", "period_start": start, "period_end": end, "count": len(drafts)}
-    else:
+            return {"ids": [d["id"] for d in drafts], "tag": "daily", "period_start": start, "period_end": end, "count": len(drafts)}
+        except Exception:
+            # LLM failed, fall through to fallback
+            pass
+
+    # Fallback:
         # Fallback: generate without LLM (raw data summary)
         return await _generate_daily_fallback(db, today, start, end)
 
