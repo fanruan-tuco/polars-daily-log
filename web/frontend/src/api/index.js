@@ -22,6 +22,8 @@ export default {
   getSettings: () => api.get('/settings'),
   getSetting: (key) => api.get(`/settings/${key}`),
   putSetting: (key, value) => api.put(`/settings/${key}`, { value }),
+  checkLLMKey: (engine, apiKey, model = '', baseUrl = '') =>
+    api.post('/settings/check-llm', { engine, api_key: apiKey, model, base_url: baseUrl }),
   getGitRepos: () => api.get('/git-repos'),
   addGitRepo: (data) => api.post('/git-repos', data),
   deleteGitRepo: (id) => api.delete(`/git-repos/${id}`),

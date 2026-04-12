@@ -105,6 +105,14 @@
           <el-form-item label="Base URL">
             <el-input v-model="settings.llm_base_url" />
           </el-form-item>
+          <el-form-item>
+            <el-button round :loading="checkingKey" @click="checkLLMKey">
+              {{ checkingKey ? 'Checking...' : 'Test Connection' }}
+            </el-button>
+            <span v-if="keyCheckResult" :style="{ marginLeft: '12px', fontSize: '13px', color: keyCheckResult.valid ? 'var(--success, #34c759)' : 'var(--danger, #ff3b30)' }">
+              {{ keyCheckResult.valid ? '&#10003;' : '&#10007;' }} {{ keyCheckResult.message }}
+            </span>
+          </el-form-item>
         </el-form>
       </div>
     </div>
@@ -188,6 +196,9 @@ const tabs = [
   { name: 'scheduler', label: 'Scheduler' },
 ]
 
+const checkingKey = ref(false)
+const keyCheckResult = ref(null)
+
 const settings = ref({
   monitor_interval_sec: 30, monitor_ocr_enabled: true, monitor_ocr_engine: 'auto',
   monitor_screenshot_retention_days: 7, jira_server_url: '', jira_pat: '',
@@ -226,6 +237,28 @@ async function addRepo() {
 async function removeRepo(id) {
   await api.deleteGitRepo(id)
   await loadGitRepos()
+}
+
+async function checkLLMKey() {
+  if (!settings.value.llm_api_key && settings.value.llm_engine !== 'ollama') {
+    keyCheckResult.value = { valid: false, message: 'Please enter an API Key first' }
+    return
+  }
+  checkingKey.value = true
+  keyCheckResult.value = null
+  try {
+    const res = await api.checkLLMKey(
+      settings.value.llm_engine,
+      settings.value.llm_api_key,
+      settings.value.llm_model,
+      settings.value.llm_base_url,
+    )
+    keyCheckResult.value = res.data
+  } catch (e) {
+    keyCheckResult.value = { valid: false, message: e.response?.data?.detail || 'Check failed' }
+  } finally {
+    checkingKey.value = false
+  }
 }
 
 async function saveAll() {
