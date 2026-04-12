@@ -28,7 +28,7 @@ async def test_auto_approve_approves_good_draft(db):
     mock_engine = AsyncMock()
     mock_engine.generate.return_value = json.dumps({"approved": True})
 
-    config = AutoApproveConfig(enabled=True, timeout_min=30)
+    config = AutoApproveConfig(enabled=True, trigger_time="18:30")
     workflow = DailyWorkflow(db, mock_engine, config)
     await workflow.auto_approve_pending("2026-04-12")
 
@@ -54,7 +54,7 @@ async def test_auto_approve_rejects_bad_draft(db):
         {"approved": False, "reason": "日志内容过于笼统"}
     )
 
-    config = AutoApproveConfig(enabled=True, timeout_min=30)
+    config = AutoApproveConfig(enabled=True, trigger_time="18:30")
     workflow = DailyWorkflow(db, mock_engine, config)
     await workflow.auto_approve_pending("2026-04-12")
 

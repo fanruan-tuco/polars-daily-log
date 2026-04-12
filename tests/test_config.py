@@ -30,4 +30,4 @@ def test_load_config_with_defaults():
     assert config.llm.engine == "kimi"
     assert config.scheduler.trigger_time == "18:00"
     assert config.auto_approve.enabled is True
-    assert config.auto_approve.timeout_min == 30
+    assert config.auto_approve.trigger_time == "18:30"

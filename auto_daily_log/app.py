@@ -38,9 +38,11 @@ class Application:
             return
 
         self.scheduler = AsyncIOScheduler()
-        hour, minute = map(int, self.config.scheduler.trigger_time.split(":"))
 
-        async def daily_job():
+        # Daily log generation job
+        gen_hour, gen_minute = map(int, self.config.scheduler.trigger_time.split(":"))
+
+        async def daily_generate_job():
             engine = get_llm_engine(self.config.llm)
             workflow = DailyWorkflow(self.db, engine, self.config.auto_approve)
             await workflow.run_daily_summary()
@@ -53,15 +55,24 @@ class Application:
                 await indexer.index_activities(today)
                 await indexer.index_commits(today)
 
-            if self.config.auto_approve.enabled:
-                timeout = self.config.auto_approve.timeout_min * 60
-                await asyncio.sleep(timeout)
-                today = datetime.now().strftime("%Y-%m-%d")
-                await workflow.auto_approve_pending(today)
-
         self.scheduler.add_job(
-            daily_job, "cron", hour=hour, minute=minute, id="daily_summary"
+            daily_generate_job, "cron", hour=gen_hour, minute=gen_minute, id="daily_generate"
         )
+
+        # Auto-approve + submit job (separate trigger time)
+        if self.config.auto_approve.enabled:
+            approve_hour, approve_minute = map(int, self.config.auto_approve.trigger_time.split(":"))
+
+            async def auto_approve_job():
+                engine = get_llm_engine(self.config.llm)
+                workflow = DailyWorkflow(self.db, engine, self.config.auto_approve)
+                today = datetime.now().strftime("%Y-%m-%d")
+                await workflow.auto_approve_and_submit(today)
+
+            self.scheduler.add_job(
+                auto_approve_job, "cron", hour=approve_hour, minute=approve_minute, id="auto_approve"
+            )
+
         self.scheduler.start()
 
     async def run(self) -> None:
@@ -70,6 +81,12 @@ class Application:
         self._init_scheduler()
 
         app = create_app(self.db)
+
+        # Attach LLM engine to app state for API use (daily generate)
+        try:
+            app.state._llm_engine = get_llm_engine(self.config.llm)
+        except Exception:
+            app.state._llm_engine = None
 
         # Attach searcher to app state if embedding is enabled
         emb_engine = get_embedding_engine(self.config.llm, self.config.embedding)

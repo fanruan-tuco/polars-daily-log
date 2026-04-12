@@ -52,7 +52,7 @@ async def test_full_daily_workflow(client):
         "scheduler_enabled": "true",
         "scheduler_trigger_time": "18:00",
         "auto_approve_enabled": "true",
-        "auto_approve_timeout_min": "30",
+        "auto_approve_trigger_time": "18:30",
     }
     for key, value in settings.items():
         resp = await http.put(f"/api/settings/{key}", json={"value": value})
@@ -197,7 +197,7 @@ async def test_full_daily_workflow(client):
 
     auto_engine = AsyncMock()
     auto_engine.generate.return_value = json.dumps({"approved": True})
-    config = AutoApproveConfig(enabled=True, timeout_min=30)
+    config = AutoApproveConfig(enabled=True, trigger_time="18:30")
     workflow = DailyWorkflow(db, auto_engine, config)
     await workflow.auto_approve_pending(today)
 

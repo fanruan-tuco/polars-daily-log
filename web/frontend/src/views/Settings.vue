@@ -131,7 +131,7 @@
         <div class="prompt-section">
           <h4 class="card-title">Auto-Approve Prompt</h4>
           <p class="card-description">
-            <strong>Purpose:</strong> After draft generation, if no one reviews within the timeout (default 30 min),
+            <strong>Purpose:</strong> At the configured auto-approve time (default 18:30), if there are still unreviewed daily drafts,
             the system sends each draft to the LLM for quality assessment. Passing drafts are auto-approved and submitted to Jira.
           </p>
           <p class="card-hint">
@@ -157,8 +157,8 @@
           <el-form-item label="Auto-Approve Enabled">
             <el-switch v-model="settings.auto_approve_enabled" />
           </el-form-item>
-          <el-form-item label="Auto-Approve Timeout (minutes)">
-            <el-input-number v-model="settings.auto_approve_timeout_min" :min="5" :max="120" />
+          <el-form-item label="Auto-Approve & Submit Time">
+            <el-time-picker v-model="settings.auto_approve_trigger_time" format="HH:mm" value-format="HH:mm" />
           </el-form-item>
         </el-form>
       </div>
@@ -194,7 +194,7 @@ const settings = ref({
   llm_engine: 'kimi', llm_api_key: '', llm_model: '', llm_base_url: '',
   summarize_prompt: '', auto_approve_prompt: '',
   scheduler_enabled: true, scheduler_trigger_time: '18:00',
-  auto_approve_enabled: true, auto_approve_timeout_min: 30,
+  auto_approve_enabled: true, auto_approve_trigger_time: '18:30',
 })
 const gitRepos = ref([])
 const newRepo = ref({ path: '', author_email: '' })

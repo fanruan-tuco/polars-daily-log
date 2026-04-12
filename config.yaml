@@ -44,7 +44,7 @@ scheduler:
 
 auto_approve:
   enabled: true
-  timeout_min: 30
+  trigger_time: "18:30"
 
 embedding:
   enabled: true

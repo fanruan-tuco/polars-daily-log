@@ -3,7 +3,7 @@ import re
 from datetime import date, datetime
 from typing import Optional
 
-from ..config import AutoApproveConfig
+from ..config import AutoApproveConfig, JiraConfig
 from ..models.database import Database
 from ..summarizer.engine import LLMEngine
 from ..summarizer.prompt import DEFAULT_AUTO_APPROVE_PROMPT, render_prompt
@@ -26,12 +26,17 @@ class DailyWorkflow:
         drafts = await summarizer.generate_drafts(target)
         return drafts
 
+    async def auto_approve_and_submit(self, target_date: str) -> None:
+        """Auto-approve pending daily drafts via LLM, then submit approved ones to Jira."""
+        await self.auto_approve_pending(target_date)
+        await self._submit_approved(target_date)
+
     async def auto_approve_pending(self, target_date: str) -> None:
         if not self._auto_approve_config.enabled:
             return
 
         drafts = await self._db.fetch_all(
-            "SELECT * FROM worklog_drafts WHERE date = ? AND status = 'pending_review'",
+            "SELECT * FROM worklog_drafts WHERE date = ? AND status = 'pending_review' AND tag = 'daily'",
             (target_date,),
         )
 
@@ -73,6 +78,48 @@ class DailyWorkflow:
                 await self._db.execute(
                     "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'auto_rejected', ?)",
                     (draft["id"], raw_response),
+                )
+
+    async def _submit_approved(self, target_date: str) -> None:
+        """Submit all approved/auto_approved daily drafts to Jira."""
+        drafts = await self._db.fetch_all(
+            "SELECT * FROM worklog_drafts WHERE date = ? AND status IN ('approved', 'auto_approved') AND tag = 'daily'",
+            (target_date,),
+        )
+        if not drafts:
+            return
+
+        jira_url = await self._db.fetch_one("SELECT value FROM settings WHERE key = 'jira_server_url'")
+        jira_pat = await self._db.fetch_one("SELECT value FROM settings WHERE key = 'jira_pat'")
+        if not jira_url or not jira_pat or not jira_url["value"] or not jira_pat["value"]:
+            return  # Jira not configured, skip
+
+        from ..jira_client.client import JiraClient
+        jira_config = JiraConfig(server_url=jira_url["value"], pat=jira_pat["value"])
+        jira = JiraClient(jira_config)
+
+        for draft in drafts:
+            try:
+                started = f"{draft['date']}T09:00:00.000+0800"
+                result = await jira.submit_worklog(
+                    issue_key=draft["issue_key"],
+                    time_spent_sec=draft["time_spent_sec"],
+                    comment=draft["summary"],
+                    started=started,
+                )
+                jira_worklog_id = result.get("id", "")
+                await self._db.execute(
+                    "UPDATE worklog_drafts SET status = 'submitted', jira_worklog_id = ?, updated_at = datetime('now') WHERE id = ?",
+                    (str(jira_worklog_id), draft["id"]),
+                )
+                await self._db.execute(
+                    "INSERT INTO audit_logs (draft_id, action, jira_response) VALUES (?, 'submitted', ?)",
+                    (draft["id"], json.dumps(result, ensure_ascii=False)),
+                )
+            except Exception as e:
+                await self._db.execute(
+                    "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'submit_failed', ?)",
+                    (draft["id"], str(e)),
                 )
 
     def _parse_approval(self, response: str) -> dict:

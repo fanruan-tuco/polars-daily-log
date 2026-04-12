@@ -69,7 +69,11 @@ async def check_period_exists(body: GenerateRequest, request: Request):
 
 @router.post("/worklogs/generate")
 async def generate_summary(body: GenerateRequest, request: Request):
-    """Generate worklog summary for a time period."""
+    """Generate worklog summary for a time period.
+
+    - daily: calls LLM with activities + commits + issues → per-issue drafts (pending_review)
+    - weekly/monthly/custom: reads daily logs in the period → LLM generates period summary (archived)
+    """
     from datetime import date as date_mod
     from collections import defaultdict
     db = request.app.state.db
@@ -81,18 +85,53 @@ async def generate_summary(body: GenerateRequest, request: Request):
         raise HTTPException(400, f"Invalid type or missing dates: {tag}")
 
     # Check for existing same-period log
-    existing = await db.fetch_one(
+    existing_rows = await db.fetch_all(
         "SELECT id FROM worklog_drafts WHERE tag = ? AND period_start = ? AND period_end = ?",
         (tag, start, end),
     )
-    if existing and not body.force:
+    if existing_rows and not body.force:
         raise HTTPException(409, "Log already exists for this period. Use force=true to overwrite.")
-    if existing and body.force:
-        # Delete old record
-        await db.execute("DELETE FROM audit_logs WHERE draft_id = ?", (existing["id"],))
-        await db.execute("DELETE FROM worklog_drafts WHERE id = ?", (existing["id"],))
+    if existing_rows and body.force:
+        for ex in existing_rows:
+            await db.execute("DELETE FROM audit_logs WHERE draft_id = ?", (ex["id"],))
+            await db.execute("DELETE FROM worklog_drafts WHERE id = ?", (ex["id"],))
 
-    # Collect activities and commits for the date range
+    if tag == "daily":
+        return await _generate_daily(db, request, today, start, end)
+    else:
+        return await _generate_period(db, request, tag, today, start, end)
+
+
+async def _generate_daily(db, request, today, start, end):
+    """Daily: use LLM Summarizer to generate per-issue worklog drafts."""
+    # Try to use LLM engine from app state
+    llm_engine = getattr(request.app.state, "_llm_engine", None)
+
+    if llm_engine:
+        from ...summarizer.summarizer import WorklogSummarizer
+        from ...collector.git_collector import GitCollector
+
+        collector = GitCollector(db)
+        await collector.collect_today()
+        summarizer = WorklogSummarizer(db, llm_engine)
+        drafts = await summarizer.generate_drafts(start)
+
+        # Update the generated drafts with tag and period fields
+        for d in drafts:
+            await db.execute(
+                "UPDATE worklog_drafts SET tag = 'daily', period_start = ?, period_end = ? WHERE id = ?",
+                (start, end, d["id"]),
+            )
+
+        return {"ids": [d["id"] for d in drafts], "tag": "daily", "period_start": start, "period_end": end, "count": len(drafts)}
+    else:
+        # Fallback: generate without LLM (raw data summary)
+        return await _generate_daily_fallback(db, today, start, end)
+
+
+async def _generate_daily_fallback(db, today, start, end):
+    """Fallback daily generation without LLM — raw activity + commit summary."""
+    from collections import defaultdict
     activities = await db.fetch_all(
         "SELECT * FROM activities WHERE date(timestamp) >= ? AND date(timestamp) <= ? AND category != 'idle' ORDER BY timestamp",
         (start, end),
@@ -101,47 +140,91 @@ async def generate_summary(body: GenerateRequest, request: Request):
         "SELECT * FROM git_commits WHERE date >= ? AND date <= ? ORDER BY committed_at",
         (start, end),
     )
-
     if not activities and not commits:
         raise HTTPException(404, f"No activity or commit data found for {start} to {end}")
 
-    # Build summary text
     summary_parts = []
     cat_duration = defaultdict(int)
     for a in activities:
         cat_duration[a["category"]] += a.get("duration_sec", 0)
-
     if cat_duration:
         summary_parts.append("Activity summary:")
         for cat, sec in sorted(cat_duration.items(), key=lambda x: -x[1]):
-            hours = round(sec / 3600, 1)
-            summary_parts.append(f"  - {cat}: {hours}h")
-
+            summary_parts.append(f"  - {cat}: {round(sec / 3600, 1)}h")
     if commits:
         summary_parts.append(f"\nGit commits ({len(commits)}):")
         for c in commits[:20]:
             summary_parts.append(f"  - {c['message']}")
 
     total_sec = sum(a.get("duration_sec", 0) for a in activities)
-    summary_text = "\n".join(summary_parts) if summary_parts else "No data"
-
-    if tag == "daily":
-        status = "pending_review"
-        issue_key = "ALL"
-    else:
-        status = "archived"
-        issue_key = "SUMMARY"
+    summary_text = "\n".join(summary_parts) or "No data"
 
     draft_id = await db.execute(
         "INSERT INTO worklog_drafts (date, issue_key, time_spent_sec, summary, status, tag, period_start, period_end) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (today.isoformat(), issue_key, total_sec, summary_text, status, tag, start, end),
+        "VALUES (?, ?, ?, ?, 'pending_review', 'daily', ?, ?)",
+        (today.isoformat(), "ALL", total_sec, summary_text, start, end),
+    )
+    await db.execute(
+        "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'created', ?)",
+        (draft_id, json.dumps({"tag": "daily", "period": f"{start} to {end}"})),
+    )
+    return {"id": draft_id, "tag": "daily", "period_start": start, "period_end": end}
+
+
+async def _generate_period(db, request, tag, today, start, end):
+    """Weekly/Monthly/Custom: read daily logs in the period → LLM generates period summary."""
+    # Fetch all daily logs within the period
+    daily_logs = await db.fetch_all(
+        "SELECT * FROM worklog_drafts WHERE tag = 'daily' AND period_start >= ? AND period_end <= ? ORDER BY period_start",
+        (start, end),
+    )
+
+    if not daily_logs:
+        raise HTTPException(404, f"No daily logs found for {start} to {end}. Generate daily logs first.")
+
+    # Build text from daily logs
+    daily_text_parts = []
+    total_sec = 0
+    for log in daily_logs:
+        total_sec += log.get("time_spent_sec", 0)
+        daily_text_parts.append(
+            f"【{log.get('period_start', log['date'])}】{log.get('issue_key', '')} ({round(log.get('time_spent_sec', 0) / 3600, 1)}h)\n{log['summary']}"
+        )
+    daily_text = "\n\n".join(daily_text_parts)
+
+    # Try LLM
+    llm_engine = getattr(request.app.state, "_llm_engine", None)
+    if llm_engine:
+        from ...summarizer.prompt import DEFAULT_PERIOD_SUMMARY_PROMPT, render_prompt
+        period_type_label = {"weekly": "周报", "monthly": "月报", "custom": "阶段性总结"}[tag]
+
+        # Try custom prompt from settings first
+        setting = await db.fetch_one("SELECT value FROM settings WHERE key = 'period_summary_prompt'")
+        template = setting["value"] if setting else DEFAULT_PERIOD_SUMMARY_PROMPT
+
+        prompt = render_prompt(
+            template,
+            period_start=start,
+            period_end=end,
+            period_type=period_type_label,
+            daily_logs=daily_text,
+        )
+        try:
+            summary_text = await llm_engine.generate(prompt)
+        except Exception:
+            summary_text = daily_text  # Fallback to raw daily logs
+    else:
+        summary_text = f"=== {start} ~ {end} ===\n\n{daily_text}"
+
+    draft_id = await db.execute(
+        "INSERT INTO worklog_drafts (date, issue_key, time_spent_sec, summary, status, tag, period_start, period_end) "
+        "VALUES (?, ?, ?, ?, 'archived', ?, ?, ?)",
+        (today.isoformat(), "SUMMARY", total_sec, summary_text, tag, start, end),
     )
     await db.execute(
         "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'created', ?)",
         (draft_id, json.dumps({"tag": tag, "period": f"{start} to {end}"})),
     )
-
     return {"id": draft_id, "tag": tag, "period_start": start, "period_end": end}
 
 @router.post("/worklogs/seed", status_code=201)
