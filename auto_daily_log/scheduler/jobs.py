@@ -135,6 +135,6 @@ class DailyWorkflow:
         setting = await self._db.fetch_one(
             "SELECT value FROM settings WHERE key = 'auto_approve_prompt'"
         )
-        if setting:
+        if setting and setting["value"] and setting["value"].strip():
             return setting["value"]
         return DEFAULT_AUTO_APPROVE_PROMPT

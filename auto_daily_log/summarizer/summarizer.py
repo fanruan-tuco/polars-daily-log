@@ -31,18 +31,14 @@ class WorklogSummarizer:
         issues_text = "\n".join(
             f"- {i['issue_key']}: {i['summary']} ({i['description'] or ''})"
             for i in issues
-        ) or "无"
+        ) or "无（请将所有工作汇总为一条，issue_key 使用 ALL）"
 
         commits_text = "\n".join(
             f"- {c['committed_at'][:16]} {c['message']} ({c.get('files_changed', '')})"
             for c in commits
         ) or "无"
 
-        activities_text = "\n".join(
-            f"- {a['timestamp'][:16]} {a['app_name']} ({a['window_title']}) "
-            f"{a['category']} {a['duration_sec']}s"
-            for a in activities
-        ) or "无"
+        activities_text = self._compress_activities(activities)
 
         prompt = render_prompt(
             template,
@@ -52,11 +48,18 @@ class WorklogSummarizer:
             activities=activities_text,
         )
 
+        print(f"[Summarizer] Prompt length: {len(prompt)}, first 100: {prompt[:100]}")
         raw_response = await self._engine.generate(prompt)
+        print(f"[Summarizer] Response length: {len(raw_response)}, first 100: {raw_response[:100]}")
         parsed = self._parse_response(raw_response)
 
+        if not parsed:
+            # LLM returned nothing useful, don't delete existing drafts
+            return []
+
+        # Only delete old pending drafts after confirming we have new ones
         await self._db.execute(
-            "DELETE FROM worklog_drafts WHERE date = ? AND status = 'pending_review'",
+            "DELETE FROM worklog_drafts WHERE date = ? AND status = 'pending_review' AND tag = 'daily'",
             (target_date,),
         )
 
@@ -99,6 +102,46 @@ class WorklogSummarizer:
 
         return drafts
 
+    def _compress_activities(self, activities: list[dict]) -> str:
+        """Compress raw activities into a concise summary for LLM prompt.
+        Groups by app+category, aggregates duration, keeps key details."""
+        if not activities:
+            return "无"
+
+        from collections import defaultdict
+
+        # Group by (category, app_name) and aggregate
+        groups = defaultdict(lambda: {"duration": 0, "titles": set(), "ocr_snippets": []})
+        for a in activities:
+            key = (a.get("category", "other"), a.get("app_name", "Unknown"))
+            groups[key]["duration"] += a.get("duration_sec", 0)
+            title = a.get("window_title")
+            if title:
+                groups[key]["titles"].add(title[:60])
+            # Extract OCR text if available
+            if a.get("signals"):
+                try:
+                    signals = json.loads(a["signals"])
+                    ocr = signals.get("ocr_text", "")
+                    if ocr and len(groups[key]["ocr_snippets"]) < 3:
+                        groups[key]["ocr_snippets"].append(ocr[:100])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        lines = []
+        for (cat, app), info in sorted(groups.items(), key=lambda x: -x[1]["duration"]):
+            hours = round(info["duration"] / 3600, 1)
+            if hours < 0.1:
+                continue
+            titles = list(info["titles"])[:5]
+            title_str = ", ".join(titles) if titles else ""
+            line = f"- [{cat}] {app} ({hours}h): {title_str}"
+            if info["ocr_snippets"]:
+                line += f" | OCR: {'; '.join(info['ocr_snippets'][:2])}"
+            lines.append(line)
+
+        return "\n".join(lines) or "无"
+
     def _parse_response(self, response: str) -> list[dict]:
         json_match = re.search(r"\[.*\]", response, re.DOTALL)
         if json_match:
@@ -122,6 +165,6 @@ class WorklogSummarizer:
         setting = await self._db.fetch_one(
             "SELECT value FROM settings WHERE key = 'summarize_prompt'"
         )
-        if setting:
+        if setting and setting["value"] and setting["value"].strip():
             return setting["value"]
         return DEFAULT_SUMMARIZE_PROMPT

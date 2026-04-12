@@ -149,15 +149,16 @@ async def _generate_daily(db, request, today, start, end):
             summarizer = WorklogSummarizer(db, llm_engine)
             drafts = await summarizer.generate_drafts(start)
 
-            for d in drafts:
-                await db.execute(
-                    "UPDATE worklog_drafts SET tag = 'daily', period_start = ?, period_end = ? WHERE id = ?",
-                    (start, end, d["id"]),
-                )
-
-            return {"ids": [d["id"] for d in drafts], "tag": "daily", "period_start": start, "period_end": end, "count": len(drafts)}
+            if drafts:
+                for d in drafts:
+                    await db.execute(
+                        "UPDATE worklog_drafts SET tag = 'daily', period_start = ?, period_end = ? WHERE id = ?",
+                        (start, end, d["id"]),
+                    )
+                return {"ids": [d["id"] for d in drafts], "tag": "daily", "period_start": start, "period_end": end, "count": len(drafts)}
+            # LLM returned empty, fall through to fallback
+            print("[Generate] LLM returned empty result, using fallback")
         except Exception as e:
-            # LLM failed, fall through to fallback
             print(f"[Generate] LLM failed: {e}")
 
     # Fallback: generate without LLM (raw data summary)
