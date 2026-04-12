@@ -77,6 +77,12 @@ class SystemConfig(BaseModel):
     data_retention_days: int = 90
 
 
+class EmbeddingConfig(BaseModel):
+    enabled: bool = True
+    model: str = ""
+    dimensions: int = 1536
+
+
 class AppConfig(BaseModel):
     server: ServerConfig = ServerConfig()
     monitor: MonitorConfig = MonitorConfig()
@@ -86,6 +92,7 @@ class AppConfig(BaseModel):
     scheduler: SchedulerConfig = SchedulerConfig()
     auto_approve: AutoApproveConfig = AutoApproveConfig()
     system: SystemConfig = SystemConfig()
+    embedding: EmbeddingConfig = EmbeddingConfig()
 
 
 def load_config(config_path: Optional[str]) -> AppConfig:
