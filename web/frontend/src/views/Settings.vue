@@ -84,15 +84,28 @@
         </el-form>
       </el-tab-pane>
 
-      <el-tab-pane label="Prompts" name="prompts">
-        <h4>Summarize Prompt</h4>
+      <el-tab-pane label="Prompt 模板" name="prompts">
+        <el-alert type="info" :closable="false" style="margin-bottom: 20px">
+          Prompt 模板用于控制 LLM 生成工作日志的行为。修改后点击底部「保存」按钮生效。
+        </el-alert>
+
+        <h4>日志生成 Prompt</h4>
+        <p style="color: #606266; font-size: 13px; margin-bottom: 4px">
+          <strong>用途：</strong>每天定时触发时，系统将当天的活动记录、Git commits 和 Jira 任务列表填入此模板，
+          发送给 LLM 生成工作日志草稿。每个 Jira 任务会生成一条包含工时和摘要的草稿。
+        </p>
         <p style="color: #909399; font-size: 12px; margin-bottom: 8px">
-          Variables: {date}, {jira_issues}, {git_commits}, {activities}
+          可用变量：<code>{date}</code> 日期、<code>{jira_issues}</code> 活跃任务列表、<code>{git_commits}</code> 当天提交记录、<code>{activities}</code> 活动采集记录
         </p>
         <el-input v-model="settings.summarize_prompt" type="textarea" :rows="12" />
-        <h4 style="margin-top: 20px">Auto-Approve Prompt</h4>
+
+        <h4 style="margin-top: 24px">自动审批 Prompt</h4>
+        <p style="color: #606266; font-size: 13px; margin-bottom: 4px">
+          <strong>用途：</strong>日志草稿生成后，若超过设定时间（默认 30 分钟）无人审批，系统会将每条草稿发送给 LLM，
+          由 LLM 判断日志质量是否合格。合格则自动通过并提交到 Jira，不合格则保持待审批状态等待人工处理。
+        </p>
         <p style="color: #909399; font-size: 12px; margin-bottom: 8px">
-          Variables: {date}, {issue_key}, {issue_summary}, {time_spent_hours}, {summary}, {git_commits}
+          可用变量：<code>{date}</code> 日期、<code>{issue_key}</code> 任务编号、<code>{issue_summary}</code> 任务标题、<code>{time_spent_hours}</code> 工时、<code>{summary}</code> 日志内容、<code>{git_commits}</code> 关联提交
         </p>
         <el-input v-model="settings.auto_approve_prompt" type="textarea" :rows="12" />
       </el-tab-pane>
