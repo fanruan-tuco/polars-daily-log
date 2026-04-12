@@ -25,6 +25,13 @@ export default {
   getGitRepos: () => api.get('/git-repos'),
   addGitRepo: (data) => api.post('/git-repos', data),
   deleteGitRepo: (id) => api.delete(`/git-repos/${id}`),
+  generateSummary: (type, startDate = null, endDate = null) => {
+    const data = { type }
+    if (startDate) data.start_date = startDate
+    if (endDate) data.end_date = endDate
+    return api.post('/worklogs/generate', data)
+  },
+  getWorklogsByTag: (tag) => api.get('/worklogs', { params: { tag } }),
   search: (q, limit = 20, sourceType = null) => {
     const params = { q, limit }
     if (sourceType) params.source_type = sourceType

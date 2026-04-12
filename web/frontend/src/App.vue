@@ -41,7 +41,7 @@ const route = useRoute()
 const navLinks = [
   { path: '/', label: 'Dashboard' },
   { path: '/activities', label: 'Activities' },
-  { path: '/worklogs', label: 'Worklogs' },
+  { path: '/my-logs', label: 'My Logs' },
   { path: '/issues', label: 'Issues' },
   { path: '/settings', label: 'Settings' },
 ]

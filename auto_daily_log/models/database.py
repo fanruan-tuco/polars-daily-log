@@ -60,6 +60,9 @@ CREATE TABLE IF NOT EXISTS worklog_drafts (
     status TEXT DEFAULT 'pending_review',
     user_edited INTEGER DEFAULT 0,
     jira_worklog_id TEXT,
+    tag TEXT DEFAULT 'daily',
+    period_start TEXT,
+    period_end TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
