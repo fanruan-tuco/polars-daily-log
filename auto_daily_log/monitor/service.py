@@ -10,6 +10,8 @@ from .classifier import classify_activity
 from .platforms.detect import get_platform_module
 from .screenshot import capture_screenshot
 from .ocr import ocr_image
+from .phash import compute_phash, is_similar
+from .idle import get_idle_seconds
 
 
 class MonitorService:
@@ -21,15 +23,27 @@ class MonitorService:
         self._last_app: Optional[str] = None
         self._last_title: Optional[str] = None
         self._last_id: Optional[int] = None
+        self._last_phash = None
+        self._last_ocr_text: Optional[str] = None
+        self._last_was_idle: bool = False
         self._running = False
 
-    def _capture_raw(self) -> dict:
+    def _capture_raw_inner(self) -> dict:
         app_name = self._platform.get_frontmost_app()
         window_title = self._platform.get_window_title(app_name) if app_name else None
         tab_title, url = (
             self._platform.get_browser_tab(app_name) if app_name else (None, None)
         )
         wecom_group = self._platform.get_wecom_chat_name(app_name) if app_name else None
+        return {
+            "app_name": app_name,
+            "window_title": tab_title or window_title,
+            "url": url,
+            "wecom_group": wecom_group,
+        }
+
+    def _capture_raw(self) -> dict:
+        raw = self._capture_raw_inner()
 
         screenshot_path = None
         ocr_text = None
@@ -37,16 +51,25 @@ class MonitorService:
             today_dir = self._screenshot_dir / datetime.now().strftime("%Y-%m-%d")
             screenshot_path = capture_screenshot(today_dir)
             if screenshot_path:
-                ocr_text = ocr_image(screenshot_path, self._config.ocr_engine)
+                if self._config.phash_enabled:
+                    current_hash = compute_phash(screenshot_path)
+                    if is_similar(current_hash, self._last_phash, self._config.phash_threshold):
+                        ocr_text = self._last_ocr_text
+                        try:
+                            screenshot_path.unlink()
+                        except OSError:
+                            pass
+                        screenshot_path = None
+                    else:
+                        ocr_text = ocr_image(screenshot_path, self._config.ocr_engine)
+                        self._last_phash = current_hash
+                        self._last_ocr_text = ocr_text
+                else:
+                    ocr_text = ocr_image(screenshot_path, self._config.ocr_engine)
 
-        return {
-            "app_name": app_name,
-            "window_title": tab_title or window_title,
-            "url": url,
-            "wecom_group": wecom_group,
-            "screenshot_path": str(screenshot_path) if screenshot_path else None,
-            "ocr_text": ocr_text,
-        }
+        raw["screenshot_path"] = str(screenshot_path) if screenshot_path else None
+        raw["ocr_text"] = ocr_text
+        return raw
 
     def _is_blocked(self, raw: dict) -> bool:
         app = raw.get("app_name") or ""
@@ -60,6 +83,31 @@ class MonitorService:
         return False
 
     async def sample_once(self) -> None:
+        idle_sec = get_idle_seconds()
+        is_idle = idle_sec >= self._config.idle_threshold_sec
+
+        if is_idle:
+            if self._last_was_idle and self._last_id:
+                await self._db.execute(
+                    "UPDATE activities SET duration_sec = duration_sec + ? WHERE id = ?",
+                    (self._config.interval_sec, self._last_id),
+                )
+                return
+
+            row_id = await self._db.execute(
+                """INSERT INTO activities
+                   (timestamp, app_name, window_title, category, confidence, duration_sec)
+                   VALUES (?, ?, ?, 'idle', 0.99, ?)""",
+                (datetime.now().isoformat(), "System", "Idle", self._config.interval_sec),
+            )
+            self._last_app = None
+            self._last_title = None
+            self._last_id = row_id
+            self._last_was_idle = True
+            return
+
+        self._last_was_idle = False
+
         raw = self._capture_raw()
         if not raw["app_name"] or self._is_blocked(raw):
             return
@@ -67,7 +115,6 @@ class MonitorService:
         app_name = raw["app_name"]
         window_title = raw["window_title"]
 
-        # Merge consecutive same activity
         if app_name == self._last_app and window_title == self._last_title and self._last_id:
             await self._db.execute(
                 "UPDATE activities SET duration_sec = duration_sec + ? WHERE id = ?",

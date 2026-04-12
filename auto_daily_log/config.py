@@ -21,6 +21,9 @@ class MonitorConfig(BaseModel):
     ocr_engine: str = "auto"
     screenshot_retention_days: int = 7
     privacy: PrivacyConfig = PrivacyConfig()
+    phash_enabled: bool = True
+    phash_threshold: int = 10
+    idle_threshold_sec: int = 180
 
 
 class GitRepoConfig(BaseModel):

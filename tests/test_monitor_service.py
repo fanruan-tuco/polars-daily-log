@@ -81,3 +81,49 @@ async def test_merge_consecutive_same_activity(db, tmp_path):
     rows = await db.fetch_all("SELECT * FROM activities")
     assert len(rows) == 1
     assert rows[0]["duration_sec"] == 60
+
+
+@pytest.mark.asyncio
+async def test_idle_records_idle_category(db, tmp_path):
+    config = MonitorConfig(ocr_enabled=False, interval_sec=30, idle_threshold_sec=60)
+    service = MonitorService(db, config, screenshot_dir=tmp_path / "screenshots")
+
+    with patch.object(service, "_capture_raw") as mock_capture, \
+         patch("auto_daily_log.monitor.service.get_idle_seconds", return_value=120.0):
+        mock_capture.return_value = {
+            "app_name": "IntelliJ IDEA",
+            "window_title": "Main.java",
+            "url": None,
+            "wecom_group": None,
+            "screenshot_path": None,
+            "ocr_text": None,
+        }
+        await service.sample_once()
+
+    rows = await db.fetch_all("SELECT * FROM activities")
+    assert len(rows) == 1
+    assert rows[0]["category"] == "idle"
+
+
+@pytest.mark.asyncio
+async def test_idle_merges_consecutive(db, tmp_path):
+    config = MonitorConfig(ocr_enabled=False, interval_sec=30, idle_threshold_sec=60)
+    service = MonitorService(db, config, screenshot_dir=tmp_path / "screenshots")
+
+    with patch.object(service, "_capture_raw") as mock_capture, \
+         patch("auto_daily_log.monitor.service.get_idle_seconds", return_value=120.0):
+        mock_capture.return_value = {
+            "app_name": "IntelliJ IDEA",
+            "window_title": "Main.java",
+            "url": None,
+            "wecom_group": None,
+            "screenshot_path": None,
+            "ocr_text": None,
+        }
+        await service.sample_once()
+        await service.sample_once()
+
+    rows = await db.fetch_all("SELECT * FROM activities")
+    assert len(rows) == 1
+    assert rows[0]["category"] == "idle"
+    assert rows[0]["duration_sec"] == 60
