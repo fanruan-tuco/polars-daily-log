@@ -197,7 +197,7 @@ async def test_full_daily_workflow(client):
 
     auto_engine = AsyncMock()
     auto_engine.generate.return_value = json.dumps({"approved": True})
-    config = AutoApproveConfig(enabled=True, trigger_time="18:30")
+    config = AutoApproveConfig(enabled=True, trigger_time="21:30")
     workflow = DailyWorkflow(db, auto_engine, config)
     await workflow.auto_approve_pending(today)
 

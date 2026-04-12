@@ -44,7 +44,7 @@ scheduler:
 
 auto_approve:
   enabled: true
-  trigger_time: "18:30"
+  trigger_time: "21:30"
 
 embedding:
   enabled: true

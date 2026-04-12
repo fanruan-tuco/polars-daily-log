@@ -69,7 +69,7 @@ class SchedulerConfig(BaseModel):
 
 class AutoApproveConfig(BaseModel):
     enabled: bool = True
-    trigger_time: str = "18:30"
+    trigger_time: str = "21:30"
 
 
 class SystemConfig(BaseModel):

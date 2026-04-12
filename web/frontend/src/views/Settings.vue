@@ -194,7 +194,7 @@ const settings = ref({
   llm_engine: 'kimi', llm_api_key: '', llm_model: '', llm_base_url: '',
   summarize_prompt: '', auto_approve_prompt: '',
   scheduler_enabled: true, scheduler_trigger_time: '18:00',
-  auto_approve_enabled: true, auto_approve_trigger_time: '18:30',
+  auto_approve_enabled: true, auto_approve_trigger_time: '21:30',
 })
 const gitRepos = ref([])
 const newRepo = ref({ path: '', author_email: '' })
