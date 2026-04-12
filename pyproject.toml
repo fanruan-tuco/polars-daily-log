@@ -1,0 +1,24 @@
+[project]
+name = "auto-daily-log"
+version = "0.1.0"
+description = "Automated Jira worklog tool with activity monitoring and LLM summarization"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "aiosqlite>=0.19.0",
+    "httpx>=0.25.0",
+    "apscheduler>=3.10.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+]
+
+[project.optional-dependencies]
+macos = ["pyobjc-framework-Vision>=10.0"]
+windows = ["winocr>=0.1.0"]
+linux = ["pytesseract>=0.3.10", "Pillow>=10.0"]
+dev = ["pytest>=7.4.0", "pytest-asyncio>=0.23.0", "pytest-httpx>=0.28.0"]
+
+[project.scripts]
+auto-daily-log = "auto_daily_log.__main__:main"

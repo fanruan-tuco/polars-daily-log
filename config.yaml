@@ -1,0 +1,48 @@
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+monitor:
+  interval_sec: 30
+  ocr_enabled: true
+  ocr_engine: auto
+  screenshot_retention_days: 7
+  privacy:
+    blocked_apps: []
+    blocked_urls: []
+
+git:
+  repos: []
+
+jira:
+  server_url: ""
+  pat: ""
+
+llm:
+  engine: kimi
+  kimi:
+    api_key: ""
+    model: "moonshot-v1-8k"
+    base_url: "https://api.moonshot.cn/v1"
+  openai:
+    api_key: ""
+    model: "gpt-4o"
+    base_url: "https://api.openai.com/v1"
+  ollama:
+    model: "llama3"
+    base_url: "http://localhost:11434"
+  claude:
+    api_key: ""
+    model: "claude-sonnet-4-20250514"
+
+scheduler:
+  enabled: true
+  trigger_time: "18:00"
+
+auto_approve:
+  enabled: true
+  timeout_min: 30
+
+system:
+  language: "zh"
+  data_retention_days: 90
