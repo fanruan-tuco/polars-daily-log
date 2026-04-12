@@ -108,6 +108,22 @@ class Database:
             f"embedding FLOAT[{self._embedding_dimensions}])"
         )
         await self._conn.commit()
+        # Migrate: add new columns if missing (for existing databases)
+        await self._migrate()
+
+    async def _migrate(self) -> None:
+        """Add columns that may be missing from older schema versions."""
+        columns = await self.fetch_all("PRAGMA table_info(worklog_drafts)")
+        col_names = {c["name"] for c in columns}
+        migrations = [
+            ("tag", "ALTER TABLE worklog_drafts ADD COLUMN tag TEXT DEFAULT 'daily'"),
+            ("period_start", "ALTER TABLE worklog_drafts ADD COLUMN period_start TEXT"),
+            ("period_end", "ALTER TABLE worklog_drafts ADD COLUMN period_end TEXT"),
+        ]
+        for col, sql in migrations:
+            if col not in col_names:
+                await self._conn.execute(sql)
+        await self._conn.commit()
 
     async def close(self) -> None:
         if self._conn:
