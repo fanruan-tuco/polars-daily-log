@@ -33,32 +33,64 @@ class GenerateRequest(BaseModel):
     type: str  # daily, weekly, monthly, custom
     start_date: Optional[str] = None  # YYYY-MM-DD, for custom
     end_date: Optional[str] = None    # YYYY-MM-DD, for custom
+    force: bool = False  # True to overwrite existing same-period log
+
+
+def _resolve_period(tag: str, start_date: Optional[str], end_date: Optional[str]):
+    from datetime import date, timedelta
+    today = date.today()
+    if tag == "daily":
+        return today.isoformat(), today.isoformat()
+    elif tag == "weekly":
+        return (today - timedelta(days=today.weekday())).isoformat(), today.isoformat()
+    elif tag == "monthly":
+        return today.replace(day=1).isoformat(), today.isoformat()
+    elif tag == "custom":
+        return start_date, end_date
+    return None, None
+
+
+@router.post("/worklogs/check-exists")
+async def check_period_exists(body: GenerateRequest, request: Request):
+    """Check if a log already exists for the same period."""
+    db = request.app.state.db
+    start, end = _resolve_period(body.type, body.start_date, body.end_date)
+    if not start or not end:
+        raise HTTPException(400, f"Invalid type or missing dates: {body.type}")
+    existing = await db.fetch_one(
+        "SELECT id, tag, period_start, period_end, summary FROM worklog_drafts "
+        "WHERE tag = ? AND period_start = ? AND period_end = ?",
+        (body.type, start, end),
+    )
+    if existing:
+        return {"exists": True, "existing_id": existing["id"], "period_start": start, "period_end": end}
+    return {"exists": False, "period_start": start, "period_end": end}
+
 
 @router.post("/worklogs/generate")
 async def generate_summary(body: GenerateRequest, request: Request):
     """Generate worklog summary for a time period."""
-    from datetime import date, timedelta
+    from datetime import date as date_mod
+    from collections import defaultdict
     db = request.app.state.db
 
-    today = date.today()
+    today = date_mod.today()
     tag = body.type
+    start, end = _resolve_period(tag, body.start_date, body.end_date)
+    if not start or not end:
+        raise HTTPException(400, f"Invalid type or missing dates: {tag}")
 
-    if tag == "daily":
-        start = today.isoformat()
-        end = today.isoformat()
-    elif tag == "weekly":
-        start = (today - timedelta(days=today.weekday())).isoformat()  # Monday
-        end = today.isoformat()
-    elif tag == "monthly":
-        start = today.replace(day=1).isoformat()
-        end = today.isoformat()
-    elif tag == "custom":
-        if not body.start_date or not body.end_date:
-            raise HTTPException(400, "start_date and end_date required for custom type")
-        start = body.start_date
-        end = body.end_date
-    else:
-        raise HTTPException(400, f"Unknown type: {tag}")
+    # Check for existing same-period log
+    existing = await db.fetch_one(
+        "SELECT id FROM worklog_drafts WHERE tag = ? AND period_start = ? AND period_end = ?",
+        (tag, start, end),
+    )
+    if existing and not body.force:
+        raise HTTPException(409, "Log already exists for this period. Use force=true to overwrite.")
+    if existing and body.force:
+        # Delete old record
+        await db.execute("DELETE FROM audit_logs WHERE draft_id = ?", (existing["id"],))
+        await db.execute("DELETE FROM worklog_drafts WHERE id = ?", (existing["id"],))
 
     # Collect activities and commits for the date range
     activities = await db.fetch_all(
@@ -73,11 +105,8 @@ async def generate_summary(body: GenerateRequest, request: Request):
     if not activities and not commits:
         raise HTTPException(404, f"No activity or commit data found for {start} to {end}")
 
-    # Build summary text from data
+    # Build summary text
     summary_parts = []
-
-    # Group activities by category
-    from collections import defaultdict
     cat_duration = defaultdict(int)
     for a in activities:
         cat_duration[a["category"]] += a.get("duration_sec", 0)
@@ -90,34 +119,28 @@ async def generate_summary(body: GenerateRequest, request: Request):
 
     if commits:
         summary_parts.append(f"\nGit commits ({len(commits)}):")
-        for c in commits[:20]:  # limit
+        for c in commits[:20]:
             summary_parts.append(f"  - {c['message']}")
 
     total_sec = sum(a.get("duration_sec", 0) for a in activities)
     summary_text = "\n".join(summary_parts) if summary_parts else "No data"
 
     if tag == "daily":
-        # Use existing seed approach - one draft per issue
-        draft_id = await db.execute(
-            "INSERT INTO worklog_drafts (date, issue_key, time_spent_sec, summary, status, tag, period_start, period_end) "
-            "VALUES (?, ?, ?, ?, 'pending_review', ?, ?, ?)",
-            (today.isoformat(), "ALL", total_sec, summary_text, tag, start, end),
-        )
-        await db.execute(
-            "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'created', ?)",
-            (draft_id, json.dumps({"tag": tag, "period": f"{start} to {end}"})),
-        )
+        status = "pending_review"
+        issue_key = "ALL"
     else:
-        # Non-daily: create as 'archived' directly (no approval needed)
-        draft_id = await db.execute(
-            "INSERT INTO worklog_drafts (date, issue_key, time_spent_sec, summary, status, tag, period_start, period_end) "
-            "VALUES (?, ?, ?, ?, 'archived', ?, ?, ?)",
-            (today.isoformat(), "SUMMARY", total_sec, summary_text, tag, start, end),
-        )
-        await db.execute(
-            "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'created', ?)",
-            (draft_id, json.dumps({"tag": tag, "period": f"{start} to {end}"})),
-        )
+        status = "archived"
+        issue_key = "SUMMARY"
+
+    draft_id = await db.execute(
+        "INSERT INTO worklog_drafts (date, issue_key, time_spent_sec, summary, status, tag, period_start, period_end) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (today.isoformat(), issue_key, total_sec, summary_text, status, tag, start, end),
+    )
+    await db.execute(
+        "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'created', ?)",
+        (draft_id, json.dumps({"tag": tag, "period": f"{start} to {end}"})),
+    )
 
     return {"id": draft_id, "tag": tag, "period_start": start, "period_end": end}
 

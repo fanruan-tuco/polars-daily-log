@@ -122,7 +122,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 const selectedDate = ref(new Date().toISOString().split('T')[0])
@@ -171,14 +171,27 @@ async function filterByTag(tag) {
   await loadDrafts()
 }
 
-async function generate(type) {
+async function generate(type, startDate = null, endDate = null) {
   generating.value = true
   try {
-    await api.generateSummary(type)
+    // Check if same period already exists
+    const check = await api.checkPeriodExists(type, startDate, endDate)
+    if (check.data.exists) {
+      const period = check.data.period_start === check.data.period_end
+        ? check.data.period_start
+        : `${check.data.period_start} ~ ${check.data.period_end}`
+      await ElMessageBox.confirm(
+        `${tagLabel(type)}总结（${period}）已存在，是否覆盖？`,
+        '确认覆盖',
+        { confirmButtonText: '覆盖', cancelButtonText: '取消', type: 'warning' }
+      )
+    }
+    await api.generateSummary(type, startDate, endDate, true)
     ElMessage.success(`${tagLabel(type)}总结已生成`)
     activeTag.value = type
     await loadDrafts()
   } catch (e) {
+    if (e === 'cancel' || e?.toString?.().includes('cancel')) return
     ElMessage.error(e.response?.data?.detail || '生成失败')
   } finally {
     generating.value = false
@@ -187,17 +200,7 @@ async function generate(type) {
 
 async function generateCustom() {
   if (!customRange.value || customRange.value.length < 2) return
-  generating.value = true
-  try {
-    await api.generateSummary('custom', customRange.value[0], customRange.value[1])
-    ElMessage.success('自定义总结已生成')
-    activeTag.value = 'custom'
-    await loadDrafts()
-  } catch (e) {
-    ElMessage.error(e.response?.data?.detail || '生成失败')
-  } finally {
-    generating.value = false
-  }
+  await generate('custom', customRange.value[0], customRange.value[1])
 }
 
 function startEdit(draft) {

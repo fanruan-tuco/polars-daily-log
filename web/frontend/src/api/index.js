@@ -25,8 +25,14 @@ export default {
   getGitRepos: () => api.get('/git-repos'),
   addGitRepo: (data) => api.post('/git-repos', data),
   deleteGitRepo: (id) => api.delete(`/git-repos/${id}`),
-  generateSummary: (type, startDate = null, endDate = null) => {
+  checkPeriodExists: (type, startDate = null, endDate = null) => {
     const data = { type }
+    if (startDate) data.start_date = startDate
+    if (endDate) data.end_date = endDate
+    return api.post('/worklogs/check-exists', data)
+  },
+  generateSummary: (type, startDate = null, endDate = null, force = false) => {
+    const data = { type, force }
     if (startDate) data.start_date = startDate
     if (endDate) data.end_date = endDate
     return api.post('/worklogs/generate', data)
