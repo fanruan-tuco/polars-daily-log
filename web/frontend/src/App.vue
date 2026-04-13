@@ -50,20 +50,15 @@ const jiraUser = ref(null)
 
 async function checkJiraStatus() {
   try {
-    const res = await api.getSetting('jira_cookie')
-    if (res.data && res.data.value) {
-      // Cookie exists, try to get username
-      const res2 = await api.getSetting('jira_username')
-      if (res2.data && res2.data.value) {
-        jiraUser.value = res2.data.value
-      } else {
-        jiraUser.value = 'Connected'
-      }
-    }
+    const res = await api.getJiraStatus()
+    jiraUser.value = res.data.logged_in ? res.data.username : null
   } catch (e) { /* ignore */ }
 }
 
-onMounted(checkJiraStatus)
+onMounted(() => {
+  checkJiraStatus()
+  setInterval(checkJiraStatus, 5 * 60 * 1000) // check every 5 min
+})
 
 const navLinks = [
   { path: '/', label: 'Dashboard' },

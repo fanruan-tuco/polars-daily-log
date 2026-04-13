@@ -14,9 +14,14 @@
             <span class="issue-key">{{ row.issue_key }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="summary" label="Summary">
+        <el-table-column prop="summary" label="任务名称" min-width="200">
           <template #default="{ row }">
             <span class="issue-summary">{{ row.summary }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="描述" min-width="250" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span style="color: var(--text-secondary, #86868b); font-size: 13px">{{ row.description }}</span>
           </template>
         </el-table-column>
         <el-table-column label="Active" width="100">
@@ -49,10 +54,10 @@
             </el-button>
           </div>
         </el-form-item>
-        <el-form-item label="Summary">
+        <el-form-item label="任务名称">
           <el-input v-model="newIssue.summary" placeholder="自动获取或手动输入" />
         </el-form-item>
-        <el-form-item label="Description">
+        <el-form-item label="任务描述">
           <el-input
             v-model="newIssue.description"
             type="textarea"

@@ -21,6 +21,7 @@ export default {
   fetchJiraIssue: (key) => api.get(`/issues/fetch/${key}`),
   updateIssue: (key, data) => api.patch(`/issues/${key}`, data),
   deleteIssue: (key) => api.delete(`/issues/${key}`),
+  getJiraStatus: () => api.get('/settings/jira-status'),
   getSettings: () => api.get('/settings'),
   getDefaultPrompts: () => api.get('/settings/default-prompts'),
   getSetting: (key) => api.get(`/settings/${key}`),

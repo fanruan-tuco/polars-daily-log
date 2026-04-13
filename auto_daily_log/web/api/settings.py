@@ -203,6 +203,40 @@ async def list_settings(request: Request):
     db = request.app.state.db
     return await db.fetch_all("SELECT key, value, updated_at FROM settings")
 
+@router.get("/settings/jira-status")
+async def jira_status(request: Request):
+    """Check if Jira cookie is still valid, return username or null."""
+    import subprocess, json as _json, os
+    db = request.app.state.db
+
+    jira_url = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_server_url'") or {}).get("value", "")
+    cookie = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_cookie'") or {}).get("value", "")
+    cached_user = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_username'") or {}).get("value", "")
+
+    if not jira_url or not cookie:
+        return {"logged_in": False, "username": None}
+
+    clean_env = {**os.environ, "http_proxy": "", "https_proxy": "", "all_proxy": "", "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": ""}
+    try:
+        result = subprocess.run([
+            "curl", "-s", "--noproxy", "*", "-b", cookie,
+            f"{jira_url}/rest/api/2/myself"
+        ], capture_output=True, text=True, timeout=8, env=clean_env)
+        if result.stdout.strip().startswith("{"):
+            user = _json.loads(result.stdout)
+            username = user.get("displayName", user.get("name"))
+            if username and username != cached_user:
+                existing = await db.fetch_one("SELECT key FROM settings WHERE key = 'jira_username'")
+                if existing:
+                    await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'jira_username'", (username,))
+                else:
+                    await db.execute("INSERT INTO settings (key, value) VALUES ('jira_username', ?)", (username,))
+            return {"logged_in": True, "username": username}
+    except Exception:
+        pass
+    return {"logged_in": False, "username": cached_user}
+
+
 @router.get("/settings/do-jira-login")
 async def do_jira_login_get(request: Request, mobile: str = Query(""), password: str = Query(""), jira_url: str = Query("https://work.fineres.com/")):
     """Full login+cookie flow via GET — bypasses POST/proxy issues."""
