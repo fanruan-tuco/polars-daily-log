@@ -22,7 +22,7 @@ class MonitorConfig(BaseModel):
     screenshot_retention_days: int = 7
     privacy: PrivacyConfig = PrivacyConfig()
     phash_enabled: bool = True
-    phash_threshold: int = 10
+    phash_threshold: int = 20
     idle_threshold_sec: int = 180
 
 

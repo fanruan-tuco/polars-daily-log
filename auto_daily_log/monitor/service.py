@@ -47,13 +47,21 @@ class MonitorService:
 
         screenshot_path = None
         ocr_text = None
-        if self._config.ocr_enabled:
+
+        # Skip screenshot+OCR if app and title haven't changed (biggest resource saver)
+        app = raw.get("app_name")
+        title = raw.get("window_title")
+        same_window = (app == self._last_app and title == self._last_title
+                       and self._last_app is not None)
+
+        if self._config.ocr_enabled and not same_window:
             today_dir = self._screenshot_dir / datetime.now().strftime("%Y-%m-%d")
             screenshot_path = capture_screenshot(today_dir)
             if screenshot_path:
                 if self._config.phash_enabled:
                     current_hash = compute_phash(screenshot_path)
                     if is_similar(current_hash, self._last_phash, self._config.phash_threshold):
+                        # Screenshot visually similar — reuse last OCR, delete file
                         ocr_text = self._last_ocr_text
                         try:
                             screenshot_path.unlink()
@@ -66,6 +74,9 @@ class MonitorService:
                         self._last_ocr_text = ocr_text
                 else:
                     ocr_text = ocr_image(screenshot_path, self._config.ocr_engine)
+        elif same_window:
+            # Same window — reuse last OCR text, no screenshot
+            ocr_text = self._last_ocr_text
 
         raw["screenshot_path"] = str(screenshot_path) if screenshot_path else None
         raw["ocr_text"] = ocr_text
