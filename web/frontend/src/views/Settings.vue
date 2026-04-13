@@ -70,6 +70,13 @@
 
     <!-- Jira Tab -->
     <div v-show="activeTab === 'jira'" class="tab-content">
+      <el-alert type="warning" :closable="true" style="margin-bottom: 16px" v-if="isLocalhost">
+        <template #title>
+          <strong>检测到通过 localhost 访问</strong>
+        </template>
+        如果登录失败（只拿到 1 个 cookie），可能是本地代理（如 Clash）拦截了 localhost 请求。
+        请改用 <a :href="'http://127.0.0.1:' + location.port + location.hash" style="color: var(--accent, #0071e3); font-weight: 600">http://127.0.0.1:{{ location.port }}</a> 访问，可绕过代理。
+      </el-alert>
       <div class="settings-card">
         <h4 class="card-title">Jira 连接</h4>
         <el-form label-position="top" class="settings-form">
@@ -235,6 +242,8 @@ const tabs = [
   { name: 'prompts', label: 'Prompt 模板' },
   { name: 'scheduler', label: '定时任务' },
 ]
+
+const isLocalhost = window.location.hostname === 'localhost'
 
 const checkingKey = ref(false)
 const keyCheckResult = ref(null)
