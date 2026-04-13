@@ -28,9 +28,8 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
     db = request.app.state.db
 
     try:
-        import subprocess, re, json as _json
-        clean_env = {k: v for k, v in __import__("os").environ.items()
-                     if k.lower() not in ("http_proxy", "https_proxy", "all_proxy", "no_proxy")}
+        import subprocess, re, json as _json, os
+        clean_env = {**os.environ, "http_proxy": "", "https_proxy": "", "all_proxy": "", "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": ""}
 
         # Step 1: Login to SSO via curl (same network path as Step 2)
         login_data = f"mobile={body.mobile}&password={body.password}&referrer={body.jira_url}&app=&openid=&lang=en"
