@@ -313,7 +313,7 @@ async function doJiraLogin() {
     const d = res.data
     jiraLoginResult.value = {
       success: d.success,
-      message: d.message || (d.success ? `登录成功，已获取 ${(d.cookies || []).length} 个 Cookie` : '登录失败')
+      message: d.success ? `当前登录为：${d.username || '未知用户'}` : (d.message || '登录失败')
     }
     if (res.data.success) {
       jiraLogin.value.password = ''

@@ -270,7 +270,21 @@ async def do_jira_login_get(request: Request, mobile: str = Query(""), password:
             else:
                 await db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
 
-    return {"success": len(relevant) >= 2, "cookies": list(relevant.keys()), "debug": " | ".join(debug_hops)}
+    # Get username
+    username = None
+    if cookie_str:
+        try:
+            r3 = subprocess.run([
+                "curl", "-s", "--noproxy", "*", "-b", cookie_str,
+                f"{jira_url.rstrip('/')}/rest/api/2/myself"
+            ], capture_output=True, text=True, timeout=10, env=clean_env)
+            if r3.stdout.strip().startswith("{"):
+                user = _json.loads(r3.stdout)
+                username = user.get("displayName", user.get("name"))
+        except Exception:
+            pass
+
+    return {"success": len(relevant) >= 2, "username": username}
 
 
 @router.get("/settings/{key}")
