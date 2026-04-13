@@ -49,29 +49,35 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
 
             redirect_url = data["data"]["redirectUrl"]
 
-        # Step 2: Hit Jira with ticket, follow redirects, collect ALL cookies
-        # Use a single client with follow_redirects=True to let httpx handle the full chain
-        import re
-        debug_hops = []
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, trust_env=False, transport=httpx.AsyncHTTPTransport()) as jira_client:
-            resp2 = await jira_client.get(redirect_url)
-            debug_hops.append(f"final_status={resp2.status_code} url={str(resp2.url)[:60]}")
+        # Step 2: Use subprocess to call curl (guaranteed no proxy issues)
+        import subprocess, re, json as _json
+        debug_hops = [f"redirect_url={redirect_url}"]
+        jira_cookies = {}
 
-            # Collect cookies from the client's cookie jar (accumulated across all redirects)
-            jira_cookies = {}
-            for cookie in jira_client.cookies.jar:
-                jira_cookies[cookie.name] = cookie.value
-                debug_hops.append(f"cookie: {cookie.name} domain={cookie.domain}")
-
-            # Also parse from response history
-            all_responses = list(resp2.history) + [resp2]
-            for r in all_responses:
-                for sc in r.headers.get_list("set-cookie"):
-                    match = re.match(r"([^=]+)=([^;]*)", sc)
+        try:
+            result = subprocess.run(
+                [
+                    "curl", "-s", "-D", "-", "-o", "/dev/null",
+                    "-L",  # follow redirects
+                    "--noproxy", "*",  # bypass ALL proxies
+                    "--max-redirs", "5",
+                    redirect_url,
+                ],
+                capture_output=True, text=True, timeout=20,
+            )
+            # Parse Set-Cookie headers from curl output
+            for line in result.stdout.split("\n"):
+                line = line.strip()
+                if line.lower().startswith("set-cookie:"):
+                    cookie_part = line.split(":", 1)[1].strip()
+                    match = re.match(r"([^=]+)=([^;]*)", cookie_part)
                     if match:
-                        name = match.group(1).strip()
-                        if name in ("JSESSIONID", "seraph.rememberme.cookie", "atlassian.xsrf.token"):
-                            jira_cookies[name] = match.group(2).strip()
+                        jira_cookies[match.group(1).strip()] = match.group(2).strip()
+                elif line.lower().startswith("location:"):
+                    debug_hops.append(f"redirect→{line.split(':', 1)[1].strip()[:80]}")
+            debug_hops.append(f"curl_cookies={list(jira_cookies.keys())}")
+        except Exception as e:
+            debug_hops.append(f"curl_err={e}")
 
         # Filter to only Jira-relevant cookies
         relevant = {k: v for k, v in jira_cookies.items()
