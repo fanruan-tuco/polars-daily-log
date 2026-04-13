@@ -4,7 +4,7 @@ server:
 
 monitor:
   interval_sec: 30
-  ocr_enabled: true
+  ocr_enabled: false
   ocr_engine: auto
   screenshot_retention_days: 7
   privacy:

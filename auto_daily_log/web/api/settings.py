@@ -49,15 +49,19 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
 
             redirect_url = data["data"]["redirectUrl"]
 
-        # Step 2: Follow redirect to Jira to get session cookies
+        # Step 2: Follow all redirects to Jira to collect session cookies
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as jira_client:
-            resp2 = await jira_client.get(redirect_url)
-            jira_cookies = dict(resp2.cookies)
-            if resp2.status_code in (301, 302):
-                loc = resp2.headers.get("location", "")
-                if loc:
-                    resp3 = await jira_client.get(loc)
-                    jira_cookies.update(dict(resp3.cookies))
+            jira_cookies = {}
+            url = redirect_url
+            for _ in range(5):
+                resp2 = await jira_client.get(url)
+                jira_cookies.update(dict(resp2.cookies))
+                if resp2.status_code in (301, 302):
+                    url = resp2.headers.get("location", "")
+                    if not url:
+                        break
+                else:
+                    break
 
         cookie_str = "; ".join(f"{k}={v}" for k, v in jira_cookies.items())
 
