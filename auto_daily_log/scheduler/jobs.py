@@ -100,7 +100,15 @@ class DailyWorkflow:
 
         for draft in drafts:
             try:
-                started = f"{draft['date']}T09:00:00.000+0800"
+                # Use first activity timestamp of the day, fallback to 09:00
+                first = await self._db.fetch_one(
+                    "SELECT timestamp FROM activities WHERE date(timestamp) = ? ORDER BY timestamp LIMIT 1",
+                    (draft['date'],),
+                )
+                if first and first['timestamp']:
+                    started = f"{first['timestamp'][:19]}.000+0800"
+                else:
+                    started = f"{draft['date']}T09:00:00.000+0800"
                 result = await jira.submit_worklog(
                     issue_key=draft["issue_key"],
                     time_spent_sec=draft["time_spent_sec"],

@@ -347,7 +347,16 @@ async def submit_to_jira(draft_id: int, request: Request):
     jira_config = JiraConfig(server_url=jira_url, pat=jira_pat, auth_mode=jira_auth_mode, cookie=jira_cookie)
     jira = JiraClient(jira_config)
 
-    started = f"{draft['date']}T09:00:00.000+0800"
+    # Use first activity timestamp of the day, fallback to 09:00
+    first_activity = await db.fetch_one(
+        "SELECT timestamp FROM activities WHERE date(timestamp) = ? ORDER BY timestamp LIMIT 1",
+        (draft['date'],),
+    )
+    if first_activity and first_activity['timestamp']:
+        ts = first_activity['timestamp'][:19]  # 2026-04-13T10:30:00
+        started = f"{ts}.000+0800"
+    else:
+        started = f"{draft['date']}T09:00:00.000+0800"
     try:
         result = await jira.submit_worklog(issue_key=draft["issue_key"], time_spent_sec=draft["time_spent_sec"], comment=draft["summary"], started=started)
         jira_worklog_id = result.get("id", "")
