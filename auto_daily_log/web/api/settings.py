@@ -49,28 +49,29 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
 
             redirect_url = data["data"]["redirectUrl"]
 
-        # Step 2: Follow all redirects to Jira to collect session cookies
-        # Parse Set-Cookie headers directly to avoid httpx domain filtering
+        # Step 2: Hit Jira with ticket, follow redirects, collect ALL cookies
+        # Use a single client with follow_redirects=True to let httpx handle the full chain
         import re
-        jira_cookies = {}
-        url = redirect_url
-        for _ in range(5):
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=False, trust_env=False) as hop_client:
-                headers = {}
-                if jira_cookies:
-                    headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in jira_cookies.items())
-                resp2 = await hop_client.get(url, headers=headers)
-                # Parse Set-Cookie headers directly (bypasses httpx domain filtering)
-                for sc in resp2.headers.get_list("set-cookie"):
+        debug_hops = []
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, trust_env=False) as jira_client:
+            resp2 = await jira_client.get(redirect_url)
+            debug_hops.append(f"final_status={resp2.status_code} url={str(resp2.url)[:60]}")
+
+            # Collect cookies from the client's cookie jar (accumulated across all redirects)
+            jira_cookies = {}
+            for cookie in jira_client.cookies.jar:
+                jira_cookies[cookie.name] = cookie.value
+                debug_hops.append(f"cookie: {cookie.name} domain={cookie.domain}")
+
+            # Also parse from response history
+            all_responses = list(resp2.history) + [resp2]
+            for r in all_responses:
+                for sc in r.headers.get_list("set-cookie"):
                     match = re.match(r"([^=]+)=([^;]*)", sc)
                     if match:
-                        jira_cookies[match.group(1).strip()] = match.group(2).strip()
-                if resp2.status_code in (301, 302):
-                    url = resp2.headers.get("location", "")
-                    if not url:
-                        break
-                else:
-                    break
+                        name = match.group(1).strip()
+                        if name in ("JSESSIONID", "seraph.rememberme.cookie", "atlassian.xsrf.token"):
+                            jira_cookies[name] = match.group(2).strip()
 
         # Filter to only Jira-relevant cookies
         relevant = {k: v for k, v in jira_cookies.items()
@@ -105,10 +106,11 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
             else:
                 await db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
 
+        debug_info = " | ".join(debug_hops)
         if user:
             msg = f"Login success: {user.get('displayName', user.get('name'))} ({user.get('emailAddress', '')})"
         else:
-            msg = f"SSO login success, Cookie saved ({len(relevant)} cookies). Verification skipped."
+            msg = f"Cookie saved ({len(relevant)} cookies: {list(relevant.keys())}). Debug: {debug_info}"
         return {
             "success": True,
             "message": msg,

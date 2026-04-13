@@ -1,6 +1,12 @@
 import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
+
+# Clear proxy env vars to prevent httpx/urllib from using system proxy
+# Our API calls to Jira/LLM should go direct, not through local proxy
+for _proxy_var in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+    os.environ.pop(_proxy_var, None)
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
