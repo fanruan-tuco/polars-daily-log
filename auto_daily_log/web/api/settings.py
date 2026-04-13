@@ -49,35 +49,41 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
 
             redirect_url = data["data"]["redirectUrl"]
 
-        # Step 2: Use subprocess to call curl (guaranteed no proxy issues)
-        import subprocess, re, json as _json
-        debug_hops = [f"redirect_url={redirect_url}"]
+        # Step 2: Use curl subprocess, manually follow redirects with cookies
+        import subprocess, re
+        debug_hops = []
         jira_cookies = {}
+        url = redirect_url
 
-        try:
-            result = subprocess.run(
-                [
-                    "curl", "-s", "-D", "-", "-o", "/dev/null",
-                    "-L",  # follow redirects
-                    "--noproxy", "*",  # bypass ALL proxies
-                    "--max-redirs", "5",
-                    redirect_url,
-                ],
-                capture_output=True, text=True, timeout=20,
-            )
-            # Parse Set-Cookie headers from curl output
+        for hop_i in range(5):
+            cookie_header = "; ".join(f"{k}={v}" for k, v in jira_cookies.items())
+            cmd = ["curl", "-s", "-D", "-", "-o", "/dev/null", "--noproxy", "*", url]
+            if cookie_header:
+                cmd += ["-b", cookie_header]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            except Exception as e:
+                debug_hops.append(f"hop{hop_i+1}:ERR {e}")
+                break
+
+            location = ""
+            hop_cookies = []
             for line in result.stdout.split("\n"):
                 line = line.strip()
                 if line.lower().startswith("set-cookie:"):
-                    cookie_part = line.split(":", 1)[1].strip()
-                    match = re.match(r"([^=]+)=([^;]*)", cookie_part)
-                    if match:
-                        jira_cookies[match.group(1).strip()] = match.group(2).strip()
+                    m = re.match(r"set-cookie:\s*([^=]+)=([^;]*)", line, re.IGNORECASE)
+                    if m:
+                        jira_cookies[m.group(1).strip()] = m.group(2).strip()
+                        hop_cookies.append(m.group(1).strip())
                 elif line.lower().startswith("location:"):
-                    debug_hops.append(f"redirect→{line.split(':', 1)[1].strip()[:80]}")
-            debug_hops.append(f"curl_cookies={list(jira_cookies.keys())}")
-        except Exception as e:
-            debug_hops.append(f"curl_err={e}")
+                    location = line.split(":", 1)[1].strip()
+
+            debug_hops.append(f"hop{hop_i+1}:{hop_cookies} loc={location[:60]}")
+
+            if location:
+                url = location
+            else:
+                break
 
         # Filter to only Jira-relevant cookies
         relevant = {k: v for k, v in jira_cookies.items()
