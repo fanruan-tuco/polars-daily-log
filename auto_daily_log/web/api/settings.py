@@ -204,11 +204,13 @@ async def list_settings(request: Request):
     return await db.fetch_all("SELECT key, value, updated_at FROM settings")
 
 @router.get("/settings/test-jira-curl")
-async def test_curl():
-    """Debug: run curl from inside the server process."""
+async def test_curl(request: Request):
+    """Full login+cookie flow via GET — for browser testing."""
     import subprocess, json as _json, re, os
-    env_info = {k: os.environ.get(k, "<unset>") for k in ["http_proxy", "https_proxy", "all_proxy"]}
+    db = request.app.state.db
+    clean_env = {**os.environ, "http_proxy": "", "https_proxy": "", "all_proxy": "", "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": ""}
 
+    # Step 1: SSO login
     r1 = subprocess.run([
         "curl", "-s", "--noproxy", "*",
         "-X", "POST",
@@ -216,16 +218,53 @@ async def test_curl():
         "-H", "X-Requested-With: XMLHttpRequest",
         "-d", "mobile=18862242707&password=Shibi123458!&referrer=https://work.fineres.com/&app=&openid=&lang=en",
         "https://fanruanclub.com/login/verify"
-    ], capture_output=True, text=True, timeout=15, env={**os.environ, "http_proxy": "", "https_proxy": "", "all_proxy": ""})
+    ], capture_output=True, text=True, timeout=15, env=clean_env)
     data = _json.loads(r1.stdout)
-    url = data["data"]["redirectUrl"]
+    if not data.get("success"):
+        return {"success": False, "message": f"SSO failed: {data.get('msg')}"}
+    redirect_url = data["data"]["redirectUrl"]
 
-    r2 = subprocess.run([
-        "curl", "-s", "-D", "-", "-o", "/dev/null", "--noproxy", "*", url
-    ], capture_output=True, text=True, timeout=15, env={**os.environ, "http_proxy": "", "https_proxy": "", "all_proxy": ""})
+    # Step 2: Follow redirects
+    debug_hops = []
+    jira_cookies = {}
+    url = redirect_url
+    for hop_i in range(5):
+        cmd = ["curl", "-s", "-D", "-", "-o", "/dev/null", "--noproxy", "*", url]
+        cookie_header = "; ".join(f"{k}={v}" for k, v in jira_cookies.items())
+        if cookie_header:
+            cmd += ["-b", cookie_header]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=clean_env)
+        location = ""
+        hop_cookies = []
+        for line in result.stdout.split("\n"):
+            line = line.strip()
+            if line.lower().startswith("set-cookie:"):
+                m = re.match(r"set-cookie:\s*([^=]+)=([^;]*)", line, re.IGNORECASE)
+                if m:
+                    jira_cookies[m.group(1).strip()] = m.group(2).strip()
+                    hop_cookies.append(m.group(1).strip())
+            elif line.lower().startswith("location:"):
+                location = line.split(":", 1)[1].strip()
+        debug_hops.append(f"hop{hop_i+1}:{hop_cookies} loc={location[:80]}")
+        if location:
+            url = location
+        else:
+            break
 
-    headers = [l.strip() for l in r2.stdout.split("\n") if l.strip().lower().startswith(("location:", "set-cookie:", "http/"))]
-    return {"env": env_info, "ticket_url": url, "hop1_headers": headers}
+    # Step 3: Save
+    relevant = {k: v for k, v in jira_cookies.items()
+                if k in ("JSESSIONID", "seraph.rememberme.cookie", "atlassian.xsrf.token")}
+    cookie_str = "; ".join(f"{k}={v}" for k, v in relevant.items())
+
+    if len(relevant) >= 2:
+        for key, value in [("jira_server_url", "https://work.fineres.com"), ("jira_auth_mode", "cookie"), ("jira_cookie", cookie_str)]:
+            existing = await db.fetch_one("SELECT key FROM settings WHERE key = ?", (key,))
+            if existing:
+                await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = ?", (value, key))
+            else:
+                await db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
+
+    return {"success": len(relevant) >= 2, "cookies": list(relevant.keys()), "debug": " | ".join(debug_hops)}
 
 
 @router.get("/settings/{key}")
