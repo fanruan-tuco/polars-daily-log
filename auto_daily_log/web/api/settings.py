@@ -50,12 +50,19 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
             redirect_url = data["data"]["redirectUrl"]
 
         # Step 2: Follow all redirects to Jira to collect session cookies
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False, trust_env=False) as jira_client:
-            jira_cookies = {}
-            url = redirect_url
-            for _ in range(5):
-                resp2 = await jira_client.get(url)
-                jira_cookies.update(dict(resp2.cookies))
+        # Use cookies=None to prevent auto cookie jar — manually track via headers
+        jira_cookies = {}
+        url = redirect_url
+        for _ in range(5):
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=False, trust_env=False) as hop_client:
+                # Send accumulated cookies as header
+                headers = {}
+                if jira_cookies:
+                    headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in jira_cookies.items())
+                resp2 = await hop_client.get(url, headers=headers)
+                # Collect Set-Cookie from response
+                for name, value in resp2.cookies.items():
+                    jira_cookies[name] = value
                 if resp2.status_code in (301, 302):
                     url = resp2.headers.get("location", "")
                     if not url:
@@ -63,7 +70,10 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
                 else:
                     break
 
-        cookie_str = "; ".join(f"{k}={v}" for k, v in jira_cookies.items())
+        # Filter to only Jira-relevant cookies
+        relevant = {k: v for k, v in jira_cookies.items()
+                    if k in ("JSESSIONID", "seraph.rememberme.cookie", "atlassian.xsrf.token")}
+        cookie_str = "; ".join(f"{k}={v}" for k, v in relevant.items())
 
         # Step 3: Verify cookie works
         async with httpx.AsyncClient(timeout=10.0, trust_env=False) as verify_client:
