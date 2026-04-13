@@ -27,13 +27,8 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
     """Auto-login to Jira via SSO, get cookie, save to settings."""
     db = request.app.state.db
 
-    # Force clear proxy env to prevent interference
-    import os
-    for pv in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
-        os.environ.pop(pv, None)
-
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False, trust_env=False, transport=httpx.AsyncHTTPTransport()) as client:
             # Step 1: Login to SSO
             resp = await client.post(
                 "https://fanruanclub.com/login/verify",
@@ -58,7 +53,7 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
         # Use a single client with follow_redirects=True to let httpx handle the full chain
         import re
         debug_hops = []
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, trust_env=False) as jira_client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, trust_env=False, transport=httpx.AsyncHTTPTransport()) as jira_client:
             resp2 = await jira_client.get(redirect_url)
             debug_hops.append(f"final_status={resp2.status_code} url={str(resp2.url)[:60]}")
 
@@ -89,7 +84,7 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
         # Step 3: Try to verify (non-blocking — save cookie even if verify fails due to proxy)
         user = None
         try:
-            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as verify_client:
+            async with httpx.AsyncClient(timeout=10.0, trust_env=False, transport=httpx.AsyncHTTPTransport()) as verify_client:
                 resp4 = await verify_client.get(
                     f"{body.jira_url.rstrip('/')}/rest/api/2/myself",
                     headers={"Cookie": cookie_str},
