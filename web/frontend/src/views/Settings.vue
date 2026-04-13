@@ -100,12 +100,12 @@
         <p style="font-size: 13px; color: var(--text-secondary, #86868b); margin-bottom: 16px">
           输入帆软账号自动登录 Jira，获取并保存 Cookie。Cookie 过期后重新登录即可。
         </p>
-        <el-form label-position="top" class="settings-form">
+        <el-form label-position="top" class="settings-form" autocomplete="on">
           <el-form-item label="手机号">
-            <el-input v-model="jiraLogin.mobile" placeholder="18800000000" />
+            <el-input v-model="jiraLogin.mobile" placeholder="18800000000" name="username" autocomplete="username" />
           </el-form-item>
           <el-form-item label="密码">
-            <el-input v-model="jiraLogin.password" type="password" show-password placeholder="帆软账号密码" />
+            <el-input v-model="jiraLogin.password" type="password" show-password placeholder="帆软账号密码" name="password" autocomplete="current-password" />
           </el-form-item>
           <el-form-item>
             <el-button type="primary" round :loading="jiraLogging" @click="doJiraLogin">
