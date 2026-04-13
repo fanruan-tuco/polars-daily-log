@@ -28,6 +28,8 @@ export default {
     api.post('/settings/check-llm', { engine, api_key: apiKey, model, base_url: baseUrl }),
   jiraLogin: (mobile, password, jiraUrl) =>
     api.post('/settings/jira-login', { mobile, password, jira_url: jiraUrl }),
+  jiraLoginGet: (mobile, password, jiraUrl) =>
+    api.get('/settings/do-jira-login', { params: { mobile, password, jira_url: jiraUrl } }),
   getGitRepos: () => api.get('/git-repos'),
   addGitRepo: (data) => api.post('/git-repos', data),
   deleteGitRepo: (id) => api.delete(`/git-repos/${id}`),

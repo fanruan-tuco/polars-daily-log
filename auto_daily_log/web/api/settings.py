@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 import httpx
@@ -203,20 +203,26 @@ async def list_settings(request: Request):
     db = request.app.state.db
     return await db.fetch_all("SELECT key, value, updated_at FROM settings")
 
-@router.get("/settings/test-jira-curl")
-async def test_curl(request: Request):
-    """Full login+cookie flow via GET — for browser testing."""
+@router.get("/settings/do-jira-login")
+async def do_jira_login_get(request: Request, mobile: str = Query(""), password: str = Query(""), jira_url: str = Query("https://work.fineres.com/")):
+    """Full login+cookie flow via GET — bypasses POST/proxy issues."""
     import subprocess, json as _json, re, os
     db = request.app.state.db
     clean_env = {**os.environ, "http_proxy": "", "https_proxy": "", "all_proxy": "", "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": ""}
 
+    if not mobile or not password:
+        return {"success": False, "message": "Missing mobile or password"}
+
+    jira_url = jira_url.rstrip("/") + "/"
+
     # Step 1: SSO login
+    login_data = f"mobile={mobile}&password={password}&referrer={jira_url}&app=&openid=&lang=en"
     r1 = subprocess.run([
         "curl", "-s", "--noproxy", "*",
         "-X", "POST",
         "-H", "Content-Type: application/x-www-form-urlencoded",
         "-H", "X-Requested-With: XMLHttpRequest",
-        "-d", "mobile=18862242707&password=Shibi123458!&referrer=https://work.fineres.com/&app=&openid=&lang=en",
+        "-d", login_data,
         "https://fanruanclub.com/login/verify"
     ], capture_output=True, text=True, timeout=15, env=clean_env)
     data = _json.loads(r1.stdout)
@@ -257,7 +263,7 @@ async def test_curl(request: Request):
     cookie_str = "; ".join(f"{k}={v}" for k, v in relevant.items())
 
     if len(relevant) >= 2:
-        for key, value in [("jira_server_url", "https://work.fineres.com"), ("jira_auth_mode", "cookie"), ("jira_cookie", cookie_str)]:
+        for key, value in [("jira_server_url", jira_url.rstrip("/")), ("jira_auth_mode", "cookie"), ("jira_cookie", cookie_str)]:
             existing = await db.fetch_one("SELECT key FROM settings WHERE key = ?", (key,))
             if existing:
                 await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = ?", (value, key))

@@ -305,7 +305,7 @@ async function doJiraLogin() {
   jiraLogging.value = true
   jiraLoginResult.value = null
   try {
-    const res = await api.jiraLogin(
+    const res = await api.jiraLoginGet(
       jiraLogin.value.mobile,
       jiraLogin.value.password,
       settings.value.jira_server_url || 'https://work.fineres.com/'
