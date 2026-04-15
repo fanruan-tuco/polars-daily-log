@@ -129,6 +129,54 @@ async def test_inserting_activity_with_machine_id_roundtrip(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_llm_summary_columns_added_to_activities(tmp_path):
+    db = Database(tmp_path / "test.db", embedding_dimensions=128)
+    await db.initialize()
+    cols = await db.fetch_all("PRAGMA table_info(activities)")
+    names = {c["name"] for c in cols}
+    assert "llm_summary" in names, f"llm_summary missing; got columns: {names}"
+    assert "llm_summary_at" in names, f"llm_summary_at missing; got columns: {names}"
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_llm_summary_columns_read_write_roundtrip(tmp_path):
+    db = Database(tmp_path / "test.db", embedding_dimensions=128)
+    await db.initialize()
+    await db.execute(
+        "INSERT INTO activities (timestamp, app_name, category, duration_sec, machine_id, llm_summary, llm_summary_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            "2026-04-14T10:00:00",
+            "VSCode",
+            "coding",
+            60,
+            "local",
+            "在 VSCode 里编辑 Python 代码",
+            "2026-04-14T10:00:05",
+        ),
+    )
+    row = await db.fetch_one(
+        "SELECT llm_summary, llm_summary_at FROM activities WHERE app_name = ?", ("VSCode",)
+    )
+    assert row["llm_summary"] == "在 VSCode 里编辑 Python 代码"
+    assert row["llm_summary_at"] == "2026-04-14T10:00:05"
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_llm_pending_index_exists(tmp_path):
+    db = Database(tmp_path / "test.db", embedding_dimensions=128)
+    await db.initialize()
+    rows = await db.fetch_all(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_activities_llm_pending'"
+    )
+    assert len(rows) == 1, f"idx_activities_llm_pending index not found; rows={rows}"
+    assert rows[0]["name"] == "idx_activities_llm_pending"
+    await db.close()
+
+
+@pytest.mark.asyncio
 async def test_migration_is_idempotent(tmp_path):
     """Running migrations twice must not fail or double-add columns."""
     db_path = tmp_path / "test.db"

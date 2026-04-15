@@ -167,6 +167,15 @@ class Database:
             await self._conn.execute("ALTER TABLE activities ADD COLUMN machine_id TEXT DEFAULT 'local'")
             await self._conn.execute("UPDATE activities SET machine_id = 'local' WHERE machine_id IS NULL")
             await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_machine ON activities(machine_id)")
+        if "llm_summary" not in act_col_names:
+            await self._conn.execute("ALTER TABLE activities ADD COLUMN llm_summary TEXT")
+        if "llm_summary_at" not in act_col_names:
+            await self._conn.execute("ALTER TABLE activities ADD COLUMN llm_summary_at TEXT")
+        # Partial index: worker frequently scans pending rows (NULL or failed)
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activities_llm_pending "
+            "ON activities(timestamp) WHERE llm_summary IS NULL OR llm_summary='(failed)'"
+        )
 
         # git_commits migrations
         commit_cols = await self.fetch_all("PRAGMA table_info(git_commits)")
