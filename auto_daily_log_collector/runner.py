@@ -201,6 +201,10 @@ class CollectorRuntime:
             self._last_app = None
             self._last_title = None
             self._last_row_id = None
+            # Enricher has its own same-window dedup state; clear it too so
+            # returning from idle to the same app+title gets a fresh
+            # screenshot + OCR rather than reusing stale pre-idle data.
+            self._enricher.reset_window_state()
 
             if self._last_was_idle and self._last_idle_row_id is not None:
                 await self._backend.extend_duration(

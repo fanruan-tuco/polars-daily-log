@@ -108,6 +108,33 @@ async def test_activity_dates_filters_by_machine_id(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_activity_dates_excludes_idle_from_total_sec(tmp_path):
+    """total_sec must exclude category='idle' so the sidebar hours reflect
+    real working time, not overnight idle. Regression for the 23.2h/day
+    displayed on 2026-04-14 where 15.7h was an overnight idle row.
+    """
+    client, db = await _setup(tmp_path)
+    try:
+        r = client.post("/api/collectors/register", json=_reg_payload("A", "a.local")).json()
+        # 2 coding rows (100s + 200s = 300s) and 1 huge idle row (50000s)
+        client.post("/api/ingest/activities", json={"activities": [
+            {"timestamp": "2026-04-14T10:00:00", "app_name": "VSCode", "category": "coding", "duration_sec": 100},
+            {"timestamp": "2026-04-14T11:00:00", "app_name": "VSCode", "category": "coding", "duration_sec": 200},
+            {"timestamp": "2026-04-14T22:00:00", "app_name": "System", "category": "idle", "duration_sec": 50000},
+        ]}, headers={"Authorization": f"Bearer {r['token']}", "X-Machine-ID": r["machine_id"]})
+
+        rows = client.get("/api/activities/dates").json()
+        assert len(rows) == 1
+        assert rows[0]["date"] == "2026-04-14"
+        # count includes idle (UI shows "N records")
+        assert rows[0]["count"] == 3
+        # total_sec excludes idle: only 100 + 200 = 300
+        assert rows[0]["total_sec"] == 300
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_dashboard_filters_by_machine_id(tmp_path):
     client, db = await _setup(tmp_path)
     try:

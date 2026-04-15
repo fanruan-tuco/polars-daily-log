@@ -31,19 +31,28 @@ async def list_activity_dates(
     request: Request,
     machine_id: str = Query(default=None),
 ):
-    """Return dates with activity records; optionally filtered by machine."""
+    """Return dates with activity records; optionally filtered by machine.
+
+    `count` includes all rows (idle + real). `total_sec` **excludes idle**
+    so the sidebar "Xh" reflects actual working time, not the 14-hour
+    overnight idle that would otherwise dominate the number.
+    """
     db = request.app.state.db
+    # Count everything; sum only non-idle duration.
+    base_sql = (
+        "SELECT date(timestamp) AS date, "
+        "       COUNT(*) AS count, "
+        "       COALESCE(SUM(CASE WHEN category != 'idle' THEN duration_sec ELSE 0 END), 0) AS total_sec "
+        "FROM activities WHERE deleted_at IS NULL "
+    )
     if machine_id:
         rows = await db.fetch_all(
-            "SELECT date(timestamp) as date, COUNT(*) as count, SUM(duration_sec) as total_sec "
-            "FROM activities WHERE deleted_at IS NULL AND machine_id = ? "
-            "GROUP BY date(timestamp) ORDER BY date DESC",
+            base_sql + "AND machine_id = ? GROUP BY date(timestamp) ORDER BY date DESC",
             (machine_id,),
         )
     else:
         rows = await db.fetch_all(
-            "SELECT date(timestamp) as date, COUNT(*) as count, SUM(duration_sec) as total_sec "
-            "FROM activities WHERE deleted_at IS NULL GROUP BY date(timestamp) ORDER BY date DESC"
+            base_sql + "GROUP BY date(timestamp) ORDER BY date DESC"
         )
     return rows
 

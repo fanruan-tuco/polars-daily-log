@@ -220,6 +220,54 @@ async def test_sample_idle_after_active_flushes_pending(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_idle_resets_enricher_window_state(tmp_path):
+    """After idle transition, enricher's same-window cache must be cleared.
+
+    Regression: without this, returning from idle to the same app+title
+    was treated as same_window=True and skipped screenshot + OCR, leaving
+    post-idle rows with no screenshot (observed on 2026-04-15 17:26-17:27).
+    """
+    adapter = _make_adapter(app="iTerm2", title="Auto worklog tool")
+    backend = _make_backend(next_ids=[1, 2, 3])
+    runtime = _make_runtime(tmp_path, adapter, backend, idle_threshold_sec=60)
+
+    await runtime.sample_once()  # active — enricher caches iTerm2/title
+    enricher = runtime._enricher
+    assert enricher._last_app == "iTerm2"
+    assert enricher._last_title == "Auto worklog tool"
+
+    adapter.get_idle_seconds.return_value = 500.0
+    await runtime.sample_once()  # idle — should reset enricher
+
+    assert enricher._last_app is None
+    assert enricher._last_title is None
+    assert enricher._last_phash is None
+    assert enricher._last_ocr_text is None
+
+
+@pytest.mark.asyncio
+async def test_reset_window_state_method_on_enricher(tmp_path):
+    """Direct test of ActivityEnricher.reset_window_state()."""
+    enricher = ActivityEnricher(
+        screenshot_dir=tmp_path / "ss",
+        hostile_apps_applescript=[],
+        hostile_apps_screenshot=[],
+        phash_enabled=False,
+    )
+    enricher._last_app = "iTerm2"
+    enricher._last_title = "foo"
+    enricher._last_phash = "hash123"
+    enricher._last_ocr_text = "cached ocr"
+
+    enricher.reset_window_state()
+
+    assert enricher._last_app is None
+    assert enricher._last_title is None
+    assert enricher._last_phash is None
+    assert enricher._last_ocr_text is None
+
+
+@pytest.mark.asyncio
 async def test_ensure_registered_skip_http_requires_machine_id_and_backend(tmp_path):
     config = _make_config(tmp_path)
     enricher = ActivityEnricher(

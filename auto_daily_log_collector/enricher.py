@@ -46,6 +46,21 @@ class ActivityEnricher:
         self._last_app: Optional[str] = None
         self._last_title: Optional[str] = None
 
+    def reset_window_state(self) -> None:
+        """Clear same-window dedup state.
+
+        Called by the runner when the sample loop determines a fresh
+        context is needed — e.g. when returning from idle. Without this,
+        re-entering the same app+title post-idle would be treated as the
+        same window as before idle, skipping the screenshot + OCR and
+        leaving users wondering why gaps in the timeline have no
+        screenshots.
+        """
+        self._last_phash = None
+        self._last_ocr_text = None
+        self._last_app = None
+        self._last_title = None
+
     def is_hostile_applescript(self, app_name: Optional[str]) -> bool:
         """Whether this app breaks when probed via AppleScript/UI APIs
         (e.g. WeChat Work self-exits). Caller should skip window title
