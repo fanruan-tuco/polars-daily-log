@@ -34,6 +34,10 @@ class Application:
         # /api/ingest/* over loopback HTTP. Generated once and persisted
         # to the settings table; survives restarts.
         self._builtin_token: str = None
+        # Per-activity LLM summary background worker. Created in run()
+        # once the DB is ready; exposed via app.state and carried into
+        # DailyWorkflow so daily-generate can await a backfill first.
+        self._activity_summarizer = None
 
     async def _init_db(self) -> None:
         data_dir = self.config.system.resolved_data_dir
@@ -212,7 +216,12 @@ class Application:
 
         async def daily_generate_job():
             engine = get_llm_engine(self.config.llm)
-            workflow = DailyWorkflow(self.db, engine, self.config.auto_approve)
+            workflow = DailyWorkflow(
+                self.db,
+                engine,
+                self.config.auto_approve,
+                activity_summarizer=self._activity_summarizer,
+            )
             await workflow.run_daily_summary()
 
             # Index today's worklogs + commits for search
@@ -233,7 +242,12 @@ class Application:
 
             async def auto_approve_job():
                 engine = get_llm_engine(self.config.llm)
-                workflow = DailyWorkflow(self.db, engine, self.config.auto_approve)
+                workflow = DailyWorkflow(
+                    self.db,
+                    engine,
+                    self.config.auto_approve,
+                    activity_summarizer=self._activity_summarizer,
+                )
                 today = datetime.now().strftime("%Y-%m-%d")
                 await workflow.auto_approve_and_submit(today)
 
@@ -272,10 +286,39 @@ class Application:
         if self.config.monitor.enabled:
             await self._register_builtin_collector()
 
+        # Build the per-activity LLM summariser with late-binding engine
+        # and prompt resolvers so users can rotate LLM keys / prompt text
+        # at runtime without restarting the server.
+        from .summarizer.activity_summarizer import ActivitySummarizer
+        from .summarizer.prompt import DEFAULT_ACTIVITY_SUMMARY_PROMPT
+
+        async def _summarizer_get_engine():
+            try:
+                from .web.api.worklogs import _get_llm_engine_from_settings
+                return await _get_llm_engine_from_settings(self.db)
+            except Exception as e:
+                print(f"[ActivitySummarizer] engine lookup failed: {e}")
+                return None
+
+        async def _summarizer_get_prompt():
+            row = await self.db.fetch_one(
+                "SELECT value FROM settings WHERE key='activity_summary_prompt'"
+            )
+            if row and row["value"] and row["value"].strip():
+                return row["value"]
+            return DEFAULT_ACTIVITY_SUMMARY_PROMPT
+
+        self._activity_summarizer = ActivitySummarizer(
+            self.db, _summarizer_get_engine, _summarizer_get_prompt
+        )
+
         self._init_scheduler()
 
         app = create_app(self.db)
         app.state.config = self.config
+        # Expose so request handlers (e.g. /api/worklogs/generate) can
+        # trigger a synchronous backfill before the daily LLM step.
+        app.state.activity_summarizer = self._activity_summarizer
 
         try:
             app.state._llm_engine = get_llm_engine(self.config.llm)
@@ -294,6 +337,11 @@ class Application:
         )
         server = uvicorn.Server(config)
         server_task = asyncio.create_task(server.serve())
+
+        # Fire up the background activity-summary worker right after
+        # uvicorn is scheduled; it polls its own loop and won't block the
+        # server if the LLM engine is unreachable.
+        summarizer_task = asyncio.create_task(self._activity_summarizer.run())
 
         monitor_task = None
         watchdog = None
@@ -324,6 +372,9 @@ class Application:
         try:
             await server_task
         finally:
+            if self._activity_summarizer is not None:
+                self._activity_summarizer.stop()
+            summarizer_task.cancel()
             if self.monitor is not None:
                 self.monitor.stop()
             if monitor_task:

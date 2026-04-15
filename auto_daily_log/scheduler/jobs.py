@@ -10,10 +10,17 @@ from ..summarizer.prompt import DEFAULT_AUTO_APPROVE_PROMPT, render_prompt
 
 
 class DailyWorkflow:
-    def __init__(self, db: Database, engine: LLMEngine, auto_approve_config: AutoApproveConfig):
+    def __init__(
+        self,
+        db: Database,
+        engine: LLMEngine,
+        auto_approve_config: AutoApproveConfig,
+        activity_summarizer=None,
+    ):
         self._db = db
         self._engine = engine
         self._auto_approve_config = auto_approve_config
+        self._activity_summarizer = activity_summarizer
 
     async def run_daily_summary(self, target_date: Optional[str] = None) -> list[dict]:
         from ..collector.git_collector import GitCollector
@@ -22,7 +29,9 @@ class DailyWorkflow:
         target = target_date or date.today().isoformat()
         collector = GitCollector(self._db)
         await collector.collect_today()
-        summarizer = WorklogSummarizer(self._db, self._engine)
+        summarizer = WorklogSummarizer(
+            self._db, self._engine, activity_summarizer=self._activity_summarizer
+        )
         drafts = await summarizer.generate_drafts(target)
         return drafts
 
