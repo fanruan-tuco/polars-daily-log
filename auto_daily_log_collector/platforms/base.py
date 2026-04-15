@@ -45,3 +45,11 @@ class PlatformAdapter(ABC):
     @abstractmethod
     def get_idle_seconds(self) -> float:
         ...
+
+    def get_wecom_chat_name(self, app_name: str) -> Optional[str]:
+        """Return the currently-focused WeChat Work chat/group name, or None.
+
+        Default returns None; only platforms that can introspect WeCom
+        windows (via Accessibility/AT-SPI) override this.
+        """
+        return None

@@ -88,6 +88,17 @@ class MacOSAdapter(PlatformAdapter):
     def get_browser_tab(self, app_name: str) -> tuple[Optional[str], Optional[str]]:
         return self._api.get_browser_tab(app_name)
 
+    def get_wecom_chat_name(self, app_name: str) -> Optional[str]:
+        # Delegate to the richer inner PlatformAPI that knows the AppleScript
+        # incantation to introspect WeCom/WeChat.
+        try:
+            from auto_daily_log_collector.monitor_internals.platforms.macos import (
+                MacOSAPI as _InnerAPI,
+            )
+        except ImportError:
+            return None
+        return _InnerAPI().get_wecom_chat_name(app_name)
+
     def capture_screenshot(self, output_path) -> bool:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)

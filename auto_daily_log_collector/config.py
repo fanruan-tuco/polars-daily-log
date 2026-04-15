@@ -39,6 +39,19 @@ class CollectorConfig(BaseModel):
     blocked_apps: list[str] = Field(default_factory=list)
     blocked_urls: list[str] = Field(default_factory=list)
 
+    # Apps that self-exit when probed via AppleScript / window title APIs
+    # (WeChat Work, WeChat…). Their window title and browser-tab probes are
+    # skipped. Defaults mirror the server-side MonitorConfig defaults.
+    hostile_apps_applescript: list[str] = Field(
+        default_factory=lambda: [
+            "wechat", "wecom", "企业微信", "微信", "wechatwork", "wechatappex",
+        ]
+    )
+    # Apps that crash/self-exit when screen is captured. Empirically empty
+    # on macOS (global screencapture doesn't trigger WeCom self-exit); fill
+    # only if you encounter an app that truly reacts to capture.
+    hostile_apps_screenshot: list[str] = Field(default_factory=list)
+
     # Data dir (for offline queue + local screenshots)
     data_dir: str = ""  # default: ~/.auto_daily_log_collector
 
