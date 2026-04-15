@@ -131,6 +131,103 @@ async def test_summarizer_invokes_activity_backfill(db):
     assert backfill_calls[0] == ("2026-04-12", 60)
 
 
+def test_compress_activities_prefers_llm_summary(db=None):
+    """When llm_summary present, it should appear in '内容' and not fall back to OCR."""
+    from auto_daily_log.summarizer.summarizer import WorklogSummarizer
+
+    summarizer = WorklogSummarizer.__new__(WorklogSummarizer)
+    activities = [
+        {
+            "category": "coding",
+            "app_name": "VSCode",
+            "window_title": "main.py",
+            "duration_sec": 3600,
+            "llm_summary": "在 VSCode 编辑 main.py，调试一个 bug",
+            "signals": json.dumps({"ocr_text": "x" * 200}),
+        },
+    ]
+    result = summarizer._compress_activities(activities)
+    assert "内容: 在 VSCode 编辑 main.py，调试一个 bug" in result
+    assert "OCR:" not in result
+
+
+def test_compress_activities_falls_back_to_ocr_when_null():
+    """When llm_summary is NULL, OCR truncation kicks in."""
+    from auto_daily_log.summarizer.summarizer import WorklogSummarizer
+
+    summarizer = WorklogSummarizer.__new__(WorklogSummarizer)
+    activities = [
+        {
+            "category": "coding",
+            "app_name": "VSCode",
+            "window_title": "main.py",
+            "duration_sec": 3600,
+            "llm_summary": None,
+            "signals": json.dumps({"ocr_text": "print(hello)"}),
+        },
+    ]
+    result = summarizer._compress_activities(activities)
+    assert "OCR: print(hello)" in result
+    assert "内容:" not in result
+
+
+def test_compress_activities_falls_back_on_failed_marker():
+    """'(failed)' sentinel must trigger OCR fallback, not show up in 内容."""
+    from auto_daily_log.summarizer.summarizer import WorklogSummarizer
+
+    summarizer = WorklogSummarizer.__new__(WorklogSummarizer)
+    activities = [
+        {
+            "category": "coding",
+            "app_name": "VSCode",
+            "window_title": "main.py",
+            "duration_sec": 3600,
+            "llm_summary": "(failed)",
+            "signals": json.dumps({"ocr_text": "hello ocr"}),
+        },
+    ]
+    result = summarizer._compress_activities(activities)
+    assert "OCR: hello ocr" in result
+    assert "(failed)" not in result
+
+
+def test_compress_activities_dedups_llm_summaries():
+    """Consecutive same-app activities with identical llm_summary collapse to one."""
+    from auto_daily_log.summarizer.summarizer import WorklogSummarizer
+
+    summarizer = WorklogSummarizer.__new__(WorklogSummarizer)
+    activities = [
+        {
+            "category": "coding",
+            "app_name": "VSCode",
+            "window_title": "main.py",
+            "duration_sec": 600,
+            "llm_summary": "在调试 main.py",
+            "signals": None,
+        },
+        {
+            "category": "coding",
+            "app_name": "VSCode",
+            "window_title": "main.py",
+            "duration_sec": 600,
+            "llm_summary": "在调试 main.py",
+            "signals": None,
+        },
+        {
+            "category": "coding",
+            "app_name": "VSCode",
+            "window_title": "main.py",
+            "duration_sec": 2400,
+            "llm_summary": "继续修复测试",
+            "signals": None,
+        },
+    ]
+    result = summarizer._compress_activities(activities)
+    # Deduplicated: "在调试 main.py" appears once
+    assert result.count("在调试 main.py") == 1
+    assert "继续修复测试" in result
+
+
 @pytest.mark.asyncio
 async def test_summarizer_backfill_failure_is_non_fatal(db):
     """If backfill raises, daily generation must still proceed."""

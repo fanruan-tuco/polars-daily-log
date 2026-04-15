@@ -175,27 +175,48 @@ class WorklogSummarizer:
 
     def _compress_activities(self, activities: list[dict]) -> str:
         """Compress raw activities into a text summary for LLM prompt.
-        Groups by app+category, aggregates duration, keeps window titles + OCR."""
+
+        Groups by (category, app_name), aggregates duration, keeps window
+        titles. For activity content it prefers llm_summary (dense, ≤100
+        chars, written by ActivitySummarizer) and falls back to raw OCR
+        truncation only when llm_summary is NULL or '(failed)'.
+        """
         if not activities:
             return "无"
 
         from collections import defaultdict
 
-        groups = defaultdict(lambda: {"duration": 0, "titles": set(), "ocr_snippets": []})
+        groups = defaultdict(lambda: {
+            "duration": 0,
+            "titles": set(),
+            "llm_summaries": [],
+            "ocr_fallback": [],
+        })
         for a in activities:
             key = (a.get("category", "other"), a.get("app_name", "Unknown"))
             groups[key]["duration"] += a.get("duration_sec", 0)
             title = a.get("window_title")
             if title:
                 groups[key]["titles"].add(title[:60])
-            if a.get("signals"):
-                try:
-                    signals = json.loads(a["signals"])
-                    ocr = signals.get("ocr_text", "")
-                    if ocr and len(groups[key]["ocr_snippets"]) < 3:
-                        groups[key]["ocr_snippets"].append(ocr[:100])
-                except (json.JSONDecodeError, TypeError):
-                    pass
+
+            llm_sum = a.get("llm_summary")
+            if llm_sum and llm_sum != "(failed)":
+                # Dedup — several consecutive activities often share the
+                # same app and produce similar summaries; collapse them
+                # so the prompt doesn't repeat.
+                if llm_sum not in groups[key]["llm_summaries"]:
+                    groups[key]["llm_summaries"].append(llm_sum)
+            else:
+                # Fallback: old OCR truncation. Only used when the LLM
+                # worker hasn't reached this row yet or gave up on it.
+                if a.get("signals"):
+                    try:
+                        signals = json.loads(a["signals"])
+                        ocr = (signals.get("ocr_text") or "")[:100]
+                        if ocr and len(groups[key]["ocr_fallback"]) < 3:
+                            groups[key]["ocr_fallback"].append(ocr)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
         lines = []
         for (cat, app), info in sorted(groups.items(), key=lambda x: -x[1]["duration"]):
@@ -205,8 +226,13 @@ class WorklogSummarizer:
             titles = list(info["titles"])[:5]
             title_str = ", ".join(titles) if titles else ""
             line = f"- [{cat}] {app} ({hours}h): {title_str}"
-            if info["ocr_snippets"]:
-                line += f" | OCR: {'; '.join(info['ocr_snippets'][:2])}"
+            if info["llm_summaries"]:
+                # Cap at 8 joined summaries so a chatty day doesn't blow
+                # up the step-1 prompt budget.
+                summaries = "；".join(info["llm_summaries"][:8])
+                line += f" | 内容: {summaries}"
+            elif info["ocr_fallback"]:
+                line += f" | OCR: {'; '.join(info['ocr_fallback'][:2])}"
             lines.append(line)
 
         return "\n".join(lines) or "无"
