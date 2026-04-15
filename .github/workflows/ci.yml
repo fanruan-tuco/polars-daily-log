@@ -20,10 +20,17 @@ jobs:
           - os: ubuntu-latest
             python: "3.12"
             extras: linux
+            experimental: false
           - os: macos-latest
             python: "3.12"
             extras: macos
+            experimental: false
+          - os: windows-latest
+            python: "3.12"
+            extras: windows
+            experimental: true
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
 
     steps:
       - uses: actions/checkout@v4
