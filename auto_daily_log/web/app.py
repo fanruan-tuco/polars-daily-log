@@ -16,7 +16,13 @@ def create_app(db: Database) -> FastAPI:
     app.include_router(feedback.router, prefix="/api")
     from fastapi.staticfiles import StaticFiles
     from pathlib import Path
-    frontend_dist = Path(__file__).parent.parent.parent / "web" / "frontend" / "dist"
-    if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+    # Prefer packaged dist (release wheel); fall back to dev source tree.
+    candidates = [
+        Path(__file__).resolve().parent.parent / "frontend_dist",           # installed wheel
+        Path(__file__).resolve().parent.parent.parent / "web" / "frontend" / "dist",  # dev repo
+    ]
+    for p in candidates:
+        if p.exists() and (p / "index.html").exists():
+            app.mount("/", StaticFiles(directory=str(p), html=True), name="frontend")
+            break
     return app

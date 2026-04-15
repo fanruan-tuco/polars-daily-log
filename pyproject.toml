@@ -24,9 +24,21 @@ windows = ["winocr>=0.1.0"]
 linux = ["pytesseract>=0.3.10", "Pillow>=10.0"]
 dev = ["pytest>=7.4.0", "pytest-asyncio>=0.23.0", "pytest-httpx>=0.28.0"]
 
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["auto_daily_log*"]
+include = ["auto_daily_log*", "auto_daily_log_collector*", "shared*"]
+exclude = ["tests*", "docs*", "web*", "scripts*"]
+
+# Ship pre-built frontend with the wheel so release users don't need Node.js.
+# Built files live at web/frontend/dist/ and are copied into the wheel under
+# the auto_daily_log package via a MANIFEST.in entry.
+[tool.setuptools.package-data]
+auto_daily_log = ["frontend_dist/**/*"]
 
 [project.scripts]
 auto-daily-log = "auto_daily_log.__main__:main"
+auto-daily-log-collector = "auto_daily_log_collector.__main__:main"

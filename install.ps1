@@ -1,4 +1,4 @@
-# ─── Auto Daily Log — Windows Installer ────────────────────────────
+# ─── Polars Daily Log — Windows Installer ──────────────────────────
 # Supports: Windows 10 / 11 (PowerShell 5.1+)
 # Native Windows install for server + collector (or either alone).
 #
@@ -34,6 +34,19 @@ function Write-Header($msg) { Write-Host ""; Write-Host $msg -ForegroundColor Wh
 $script:MissingCritical = $false
 $script:InstallServer = $false
 $script:InstallCollector = $false
+$script:InstallMode = 'dev'
+$script:WheelPath = $null
+
+# Detect install mode: a release tarball has wheels/auto_daily_log-*.whl;
+# a dev checkout has the pyproject.toml and auto_daily_log/ source dir.
+$wheelDir = Join-Path $InstallDir 'wheels'
+if (Test-Path $wheelDir) {
+    $wheels = Get-ChildItem -Path $wheelDir -Filter 'auto_daily_log-*.whl' -ErrorAction SilentlyContinue
+    if ($wheels -and $wheels.Count -gt 0) {
+        $script:InstallMode = 'release'
+        $script:WheelPath = $wheels[0].FullName
+    }
+}
 
 # ─── 0. Mode selection ─────────────────────────────────────────────
 function Resolve-Mode {
@@ -150,23 +163,34 @@ function Install-PythonDeps {
     Write-Info 'Upgrading pip...'
     & $script:VenvPython -m pip install --upgrade pip -q 2>&1 | Out-Null
 
-    Write-Info 'Installing auto-daily-log[windows]...'
-    Push-Location $InstallDir
-    try {
-        & $script:VenvPip install -e '.[windows]' -q
-        if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
-        Write-Ok 'Installed auto-daily-log[windows]'
-    } finally {
-        Pop-Location
+    if ($script:InstallMode -eq 'release') {
+        Write-Info "Installing from bundled wheel: $(Split-Path -Leaf $script:WheelPath)"
+        & $script:VenvPip install "$($script:WheelPath)[windows]" -q
+        if ($LASTEXITCODE -ne 0) { throw "pip install (wheel) failed" }
+        Write-Ok 'Installed auto-daily-log[windows] (release mode)'
+    } else {
+        Write-Info 'Installing editable source with [windows] extras...'
+        Push-Location $InstallDir
+        try {
+            & $script:VenvPip install -e '.[windows]' -q
+            if ($LASTEXITCODE -ne 0) { throw "pip install -e failed" }
+            Write-Ok 'Installed auto-daily-log[windows] (dev mode)'
+        } finally {
+            Pop-Location
+        }
     }
 }
 
 # ─── 5. Frontend build (server mode only) ──────────────────────────
 function Build-Frontend {
     if (-not $script:InstallServer) { return }
-    if ($SkipFrontend) { Write-Header '5. Frontend'; Write-Warn 'Skipped (-SkipFrontend)'; return }
-
     Write-Header '5. Frontend'
+    if ($script:InstallMode -eq 'release') {
+        Write-Ok 'Frontend ships inside the wheel — no build needed'
+        return
+    }
+    if ($SkipFrontend) { Write-Warn 'Skipped (-SkipFrontend)'; return }
+
     $feDir = Join-Path $InstallDir 'web\frontend'
     if (-not (Test-Path $feDir)) { Write-Warn 'Frontend dir missing; skipping'; return }
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -362,11 +386,12 @@ function Show-Summary {
 # ─── Main ──────────────────────────────────────────────────────────
 function Main {
     Write-Host ''
-    Write-Host '+==============================================+' -ForegroundColor White
-    Write-Host "|  Auto Daily Log Windows Installer v$Version      |" -ForegroundColor White
-    Write-Host '+==============================================+' -ForegroundColor White
+    Write-Host '+====================================================+' -ForegroundColor White
+    Write-Host "|  Polars Daily Log Windows Installer v$Version            |" -ForegroundColor White
+    Write-Host '+====================================================+' -ForegroundColor White
 
     Resolve-Mode
+    Write-Info "Install mode: $($script:InstallMode)"
     Test-Python
     Test-SystemDeps
 

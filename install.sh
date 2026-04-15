@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ─── Auto Daily Log Installer ───────────────────────────────────────
+# ─── Polars Daily Log Installer ─────────────────────────────────────
 # Supports: macOS (Intel/Apple Silicon), Linux (Debian/Ubuntu/Fedora/Arch)
 # Usage:    bash install.sh
 # ─────────────────────────────────────────────────────────────────────
@@ -13,6 +13,14 @@ INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$INSTALL_DIR/.venv"
 MIN_PYTHON="3.9"
 
+# Role selection (server / collector / both / ask)
+# Override via env: ADL_ROLE=collector ADL_SERVER_URL=http://... ADL_COLLECTOR_NAME=foo bash install.sh
+ROLE="${ADL_ROLE:-ask}"
+SERVER_URL_INPUT="${ADL_SERVER_URL:-}"
+COLLECTOR_NAME_INPUT="${ADL_COLLECTOR_NAME:-}"
+INSTALL_SERVER=0
+INSTALL_COLLECTOR=0
+
 # ─── Colors ──────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -21,6 +29,38 @@ warn() { echo -e "  ${YELLOW}!${NC} $1"; }
 fail() { echo -e "  ${RED}✗${NC} $1"; }
 info() { echo -e "  ${BLUE}→${NC} $1"; }
 header() { echo -e "\n${BOLD}$1${NC}"; }
+
+# ─── Resolve role (server / collector / both) ───────────────────────
+resolve_role() {
+    header "0. What are you installing?"
+
+    case "$ROLE" in
+        server|collector|both) : ;;
+        ask|"")
+            echo "  1) server      — central web server + UI (usually one per team)"
+            echo "  2) collector   — activity collector (runs on each user machine)"
+            echo "  3) both        — server AND collector on this machine"
+            local choice=""
+            while [[ ! "$choice" =~ ^[123]$ ]]; do
+                read -rp "  Choose [1/2/3]: " choice
+            done
+            case "$choice" in
+                1) ROLE="server" ;;
+                2) ROLE="collector" ;;
+                3) ROLE="both" ;;
+            esac
+            ;;
+        *) fail "Unknown ADL_ROLE: $ROLE (must be server/collector/both/ask)"; exit 1 ;;
+    esac
+
+    [[ "$ROLE" == "server"    || "$ROLE" == "both" ]] && INSTALL_SERVER=1
+    [[ "$ROLE" == "collector" || "$ROLE" == "both" ]] && INSTALL_COLLECTOR=1
+
+    local summary=""
+    (( INSTALL_SERVER    )) && summary+="server "
+    (( INSTALL_COLLECTOR )) && summary+="collector"
+    info "Will install: $summary"
+}
 
 # ─── Detect Platform ─────────────────────────────────────────────────
 detect_platform() {
@@ -243,14 +283,35 @@ setup_venv() {
     ok "Activated venv ($(python3 --version))"
 }
 
+# ─── Detect install mode (dev vs release) ───────────────────────────
+detect_install_mode() {
+    # Release tarball: ships a prebuilt wheel; no source tree for editable install.
+    # Dev checkout: has auto_daily_log/ source dir + web/frontend/src/.
+    if compgen -G "$INSTALL_DIR/wheels/auto_daily_log-*.whl" > /dev/null; then
+        INSTALL_MODE="release"
+        WHEEL_PATH="$(ls "$INSTALL_DIR/wheels/"auto_daily_log-*.whl | head -1)"
+    elif [ -d "$INSTALL_DIR/auto_daily_log" ] && [ -f "$INSTALL_DIR/pyproject.toml" ]; then
+        INSTALL_MODE="dev"
+    else
+        fail "Can't determine install mode — no wheels/ and no source tree"
+        exit 1
+    fi
+}
+
 # ─── Install Python Dependencies ─────────────────────────────────────
 install_python_deps() {
     header "5. Python Dependencies"
 
-    info "Installing core + $PLATFORM dependencies..."
     pip install --upgrade pip -q 2>/dev/null
-    pip install -e ".[$PLATFORM]" -q 2>&1 | tail -3
-    ok "Installed auto-daily-log[$PLATFORM]"
+    if [ "$INSTALL_MODE" = "release" ]; then
+        info "Installing from bundled wheel: $(basename "$WHEEL_PATH")"
+        pip install "$WHEEL_PATH[$PLATFORM]" -q 2>&1 | tail -3
+        ok "Installed auto-daily-log[$PLATFORM] (release mode)"
+    else
+        info "Installing editable source + $PLATFORM dependencies..."
+        pip install -e ".[$PLATFORM]" -q 2>&1 | tail -3
+        ok "Installed auto-daily-log[$PLATFORM] (dev mode)"
+    fi
 }
 
 # ─── Setup Data Directory & Config ────────────────────────────────────
@@ -264,18 +325,71 @@ setup_data() {
         ok "Data directory exists: $DATA_DIR"
     fi
 
-    local config_dest="$INSTALL_DIR/config.yaml"
-    if [ -f "$config_dest" ]; then
-        ok "Config file exists: $config_dest"
-    else
-        cp "$INSTALL_DIR/config.yaml.example" "$config_dest" 2>/dev/null || true
-        ok "Config file ready: $config_dest"
+    if (( INSTALL_SERVER )); then
+        local config_dest="$INSTALL_DIR/config.yaml"
+        if [ -f "$config_dest" ]; then
+            ok "Server config exists: $config_dest"
+        elif [ -f "$INSTALL_DIR/config.yaml.example" ]; then
+            cp "$INSTALL_DIR/config.yaml.example" "$config_dest"
+            ok "Created $config_dest from template"
+            info "Edit to customize Jira URL / LLM, or do it later via Web UI Settings"
+        else
+            warn "config.yaml.example not found — server may not start without config.yaml"
+        fi
+    fi
+
+    if (( INSTALL_COLLECTOR )); then
+        local coll_dest="$INSTALL_DIR/collector.yaml"
+        if [ -f "$coll_dest" ]; then
+            ok "Collector config exists: $coll_dest"
+            return
+        fi
+        [[ -f "$INSTALL_DIR/collector.yaml.example" ]] || {
+            warn "collector.yaml.example not found — cannot auto-generate collector.yaml"
+            return
+        }
+
+        local default_url="http://127.0.0.1:8888"
+        (( INSTALL_SERVER )) && default_url="http://127.0.0.1:8888"
+        local default_name
+        default_name="$(hostname -s 2>/dev/null || hostname)"
+
+        local server_url="$SERVER_URL_INPUT"
+        local name="$COLLECTOR_NAME_INPUT"
+        if [[ -z "$server_url" ]]; then
+            read -rp "  Server URL [$default_url]: " server_url
+            server_url="${server_url:-$default_url}"
+        else
+            info "Server URL: $server_url (from ADL_SERVER_URL)"
+        fi
+        if [[ -z "$name" ]]; then
+            read -rp "  Collector display name [$default_name]: " name
+            name="${name:-$default_name}"
+        else
+            info "Collector name: $name (from ADL_COLLECTOR_NAME)"
+        fi
+
+        # Inject into template (first-match sed replacement on the canonical keys)
+        sed -e "s|^server_url:.*|server_url: \"$server_url\"|" \
+            -e "s|^name:.*|name: \"$name\"|" \
+            "$INSTALL_DIR/collector.yaml.example" > "$coll_dest"
+        ok "Created collector.yaml (server=$server_url, name=$name)"
     fi
 }
 
 # ─── Build Frontend ──────────────────────────────────────────────────
 build_frontend() {
     header "7. Frontend"
+
+    if (( ! INSTALL_SERVER )); then
+        ok "Collector-only install — no frontend needed"
+        return
+    fi
+
+    if [ "$INSTALL_MODE" = "release" ]; then
+        ok "Frontend ships inside the wheel — no build needed"
+        return
+    fi
 
     local frontend_dir="$INSTALL_DIR/web/frontend"
     if [ ! -d "$frontend_dir" ]; then
@@ -353,17 +467,21 @@ assert r.returncode == 0, r.stderr
 summary() {
     header "Done!"
     echo ""
-    echo -e "  ${BOLD}Start the app:${NC}"
-    echo -e "    cd $INSTALL_DIR"
-    echo -e "    source .venv/bin/activate"
-    echo -e "    auto-daily-log --port 8080"
+    echo -e "  ${BOLD}Next steps${NC} (via ./adl):"
+    if (( INSTALL_SERVER )); then
+        echo "    ./adl server start             # start the Web UI + API"
+        echo "    ./adl server status"
+        echo "    ./adl server logs 100"
+        echo "    Open http://127.0.0.1:8888 in browser"
+    fi
+    if (( INSTALL_COLLECTOR )); then
+        echo "    ./adl collector start          # push activity to server"
+        echo "    ./adl collector status"
+    fi
+    if (( INSTALL_SERVER && INSTALL_COLLECTOR )); then
+        echo "    ./adl start                    # start both"
+    fi
     echo ""
-    echo -e "  ${BOLD}Or with Python:${NC}"
-    echo -e "    python -m auto_daily_log --port 8080"
-    echo ""
-    echo -e "  ${BOLD}Then open:${NC} http://127.0.0.1:8080"
-    echo ""
-
     if [ "$PLATFORM" = "macos" ]; then
         echo -e "  ${YELLOW}macOS Note:${NC} Grant Accessibility permissions to Terminal/iTerm2"
         echo -e "  in System Settings → Privacy & Security → Accessibility"
@@ -374,14 +492,16 @@ summary() {
 # ─── Main ─────────────────────────────────────────────────────────────
 main() {
     echo ""
-    echo -e "${BOLD}╔══════════════════════════════════════╗${NC}"
-    echo -e "${BOLD}║   Auto Daily Log Installer v$VERSION   ║${NC}"
-    echo -e "${BOLD}╚══════════════════════════════════════╝${NC}"
+    echo -e "${BOLD}╔════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}║   Polars Daily Log Installer v$VERSION    ║${NC}"
+    echo -e "${BOLD}╚════════════════════════════════════════╝${NC}"
 
     MISSING_CRITICAL=0
 
+    resolve_role
     detect_platform
-    info "Platform: $PLATFORM | Package manager: $PKG_MGR"
+    detect_install_mode
+    info "Platform: $PLATFORM | Package manager: $PKG_MGR | Mode: $INSTALL_MODE | Role: $ROLE"
 
     check_python
     check_sys_deps
