@@ -167,7 +167,10 @@ async def _generate_daily(db, request, today, start, end):
 
             collector = GitCollector(db)
             await collector.collect_today()
-            summarizer = WorklogSummarizer(db, llm_engine)
+            activity_summarizer = getattr(request.app.state, "activity_summarizer", None)
+            summarizer = WorklogSummarizer(
+                db, llm_engine, activity_summarizer=activity_summarizer
+            )
             drafts = await summarizer.generate_drafts(start)
 
             if drafts:

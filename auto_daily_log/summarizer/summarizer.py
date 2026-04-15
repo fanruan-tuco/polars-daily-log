@@ -22,13 +22,27 @@ class WorklogSummarizer:
     - per-issue JSON: column `summary` (same as before)
     """
 
-    def __init__(self, db: Database, engine: LLMEngine):
+    def __init__(self, db: Database, engine: LLMEngine, activity_summarizer=None):
         self._db = db
         self._engine = engine
+        self._activity_summarizer = activity_summarizer
 
     async def generate_drafts(
         self, target_date: str, prompt_template: Optional[str] = None
     ) -> list[dict]:
+        # Catch-up: synchronously process any pending activity rows so
+        # _compress_activities sees llm_summary values instead of the
+        # OCR-truncation fallback. Bounded at 60s; anything still pending
+        # falls through and uses the OCR fallback branch.
+        if self._activity_summarizer is not None:
+            try:
+                processed = await self._activity_summarizer.backfill_for_date(
+                    target_date, timeout_sec=60
+                )
+                print(f"[Summarizer] activity backfill processed {processed} row(s) for {target_date}")
+            except Exception as e:
+                print(f"[Summarizer] activity backfill failed (non-fatal): {e}")
+
         issues = await self._db.fetch_all(
             "SELECT * FROM jira_issues WHERE is_active = 1"
         )

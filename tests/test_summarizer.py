@@ -102,3 +102,56 @@ async def test_summarizer_generates_single_daily_draft(db):
     logs = await db.fetch_all("SELECT * FROM audit_logs")
     assert len(logs) == 1
     assert logs[0]["action"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_summarizer_invokes_activity_backfill(db):
+    """generate_drafts must call activity_summarizer.backfill_for_date up front."""
+    await db.execute(
+        """INSERT INTO activities (timestamp, app_name, window_title, category, confidence, duration_sec)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("2026-04-12T10:00:00", "VSCode", "main.py", "coding", 0.9, 60),
+    )
+
+    mock_engine = AsyncMock()
+    mock_engine.generate.side_effect = ["full summary text", "[]"]
+
+    backfill_calls = []
+
+    class FakeActivitySummarizer:
+        async def backfill_for_date(self, target_date, timeout_sec):
+            backfill_calls.append((target_date, timeout_sec))
+            return 0
+
+    fake = FakeActivitySummarizer()
+    summarizer = WorklogSummarizer(db, mock_engine, activity_summarizer=fake)
+    await summarizer.generate_drafts("2026-04-12")
+
+    assert len(backfill_calls) == 1
+    assert backfill_calls[0] == ("2026-04-12", 60)
+
+
+@pytest.mark.asyncio
+async def test_summarizer_backfill_failure_is_non_fatal(db):
+    """If backfill raises, daily generation must still proceed."""
+    await db.execute(
+        """INSERT INTO activities (timestamp, app_name, window_title, category, confidence, duration_sec)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        ("2026-04-12T10:00:00", "VSCode", "main.py", "coding", 0.9, 60),
+    )
+
+    mock_engine = AsyncMock()
+    mock_engine.generate.side_effect = ["full summary text", "[]"]
+
+    class ExplodingSummarizer:
+        async def backfill_for_date(self, target_date, timeout_sec):
+            raise RuntimeError("simulated backfill crash")
+
+    summarizer = WorklogSummarizer(
+        db, mock_engine, activity_summarizer=ExplodingSummarizer()
+    )
+    drafts = await summarizer.generate_drafts("2026-04-12")
+
+    # Draft creation continues after non-fatal backfill failure
+    assert len(drafts) == 1
+    assert drafts[0]["issue_key"] == "DAILY"
