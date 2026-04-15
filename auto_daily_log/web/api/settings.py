@@ -200,11 +200,13 @@ async def get_default_prompts():
         DEFAULT_SUMMARIZE_PROMPT,
         DEFAULT_AUTO_APPROVE_PROMPT,
         DEFAULT_PERIOD_SUMMARY_PROMPT,
+        DEFAULT_ACTIVITY_SUMMARY_PROMPT,
     )
     return {
         "summarize_prompt": DEFAULT_SUMMARIZE_PROMPT,
         "auto_approve_prompt": DEFAULT_AUTO_APPROVE_PROMPT,
         "period_summary_prompt": DEFAULT_PERIOD_SUMMARY_PROMPT,
+        "activity_summary_prompt": DEFAULT_ACTIVITY_SUMMARY_PROMPT,
     }
 
 
