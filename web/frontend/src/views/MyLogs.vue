@@ -39,21 +39,48 @@
       </div>
     </div>
 
-    <!-- Filter tabs + date picker -->
+    <!-- Filter tabs: 今日 | 历史 (hover to expand sub-options) -->
     <div class="toolbar">
       <div class="tag-filters">
-        <el-button
-          v-for="t in tagFilters" :key="t.value"
-          :type="activeTag === t.value ? 'primary' : ''"
-          :plain="activeTag !== t.value"
-          round size="small"
-          @click="filterByTag(t.value)"
+        <!-- 今日 = daily draft for today -->
+        <button
+          :class="['primary-tab', { active: isToday }]"
+          @click="selectToday"
         >
-          {{ t.label }}
-        </el-button>
+          今日
+        </button>
+
+        <!-- 历史 hover-reveal panel -->
+        <div
+          class="history-wrap"
+          @mouseenter="openHistory"
+          @mouseleave="scheduleCloseHistory"
+        >
+          <button
+            :class="['primary-tab', { active: !isToday }]"
+            @click="toggleHistoryOpen"
+          >
+            历史
+            <span class="caret" aria-hidden="true">▾</span>
+          </button>
+          <div
+            class="history-panel"
+            :class="{ open: historyOpen }"
+            @mouseenter="cancelCloseHistory"
+          >
+            <button
+              v-for="t in historyFilters"
+              :key="t.value"
+              :class="['history-chip', { active: activeTag === t.value && !isToday }]"
+              @click="selectHistory(t.value)"
+            >
+              {{ t.label }}
+            </button>
+          </div>
+        </div>
       </div>
       <el-date-picker
-        v-if="activeTag === '' || activeTag === 'daily'"
+        v-if="!isToday && (activeTag === '' || activeTag === 'daily' || activeTag === 'custom')"
         v-model="selectedDate"
         type="date"
         value-format="YYYY-MM-DD"
@@ -307,6 +334,64 @@ const tagFilters = [
   { label: '每月', value: 'monthly' },
   { label: '自定义', value: 'custom' },
 ]
+
+// "历史" dropdown options (all options except "today")
+const historyFilters = [
+  { label: '全部', value: '' },
+  { label: '每日', value: 'daily' },
+  { label: '每周', value: 'weekly' },
+  { label: '每月', value: 'monthly' },
+  { label: '自定义', value: 'custom' },
+]
+
+// "今日" is special: it's the daily draft for today. We track it with
+// a dedicated flag because the tag filter alone ('daily' + today's date)
+// can't distinguish "today's daily" from "all daily history".
+const isToday = ref(true)
+const historyOpen = ref(false)
+let closeHistoryTimer = null
+
+function selectToday() {
+  isToday.value = true
+  historyOpen.value = false
+  // '' + today's date → shows only today's drafts via getWorklogs(date)
+  activeTag.value = ''
+  selectedDate.value = todayLocalISO()
+  loadDrafts()
+}
+
+function selectHistory(value) {
+  isToday.value = false
+  historyOpen.value = false
+  // Clear date filter when switching to all/weekly/monthly (inappropriate),
+  // keep it for daily/custom
+  if (value !== 'daily' && value !== 'custom') {
+    selectedDate.value = null
+  }
+  filterByTag(value)
+}
+
+function openHistory() {
+  cancelCloseHistory()
+  historyOpen.value = true
+}
+
+function scheduleCloseHistory() {
+  cancelCloseHistory()
+  closeHistoryTimer = setTimeout(() => { historyOpen.value = false }, 180)
+}
+
+function cancelCloseHistory() {
+  if (closeHistoryTimer) {
+    clearTimeout(closeHistoryTimer)
+    closeHistoryTimer = null
+  }
+}
+
+function toggleHistoryOpen() {
+  historyOpen.value = !historyOpen.value
+  if (historyOpen.value) isToday.value = false
+}
 
 function tagLabel(tag) {
   const map = { daily: '每日', weekly: '每周', monthly: '每月', custom: '自定义' }
@@ -607,8 +692,100 @@ onMounted(() => { loadJiraContext(); loadDrafts() })
 
 .tag-filters {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
+  align-items: center;
+}
+
+/* Primary tab — 今日 / 历史 pill */
+.primary-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 18px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.primary-tab:hover {
+  color: var(--ink);
+  border-color: var(--ink-muted);
+}
+
+.primary-tab.active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+.primary-tab .caret {
+  font-size: 10px;
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+.history-wrap {
+  position: relative;
+  padding-bottom: 8px;  /* extends hover area so dropdown doesn't flicker */
+}
+
+.history-wrap:hover .caret,
+.primary-tab.active .caret {
+  opacity: 1;
+}
+
+.history-panel {
+  position: absolute;
+  top: calc(100% + 0px);
+  left: 0;
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.04);
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.history-panel.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.history-chip {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.history-chip:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+
+.history-chip.active {
+  background: var(--ink);
+  color: #fff;
 }
 
 /* ───── Empty state ───── */
