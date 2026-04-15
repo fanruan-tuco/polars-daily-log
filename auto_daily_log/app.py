@@ -41,16 +41,14 @@ class Application:
         self.db = Database(db_path, embedding_dimensions=self.config.embedding.dimensions)
         await self.db.initialize()
 
-    async def _init_monitor(self) -> None:
-        if not self.config.monitor.enabled:
-            # Pure-server mode: no built-in collector
-            self.monitor = None
-            return
+    def _make_builtin_collector(self):
+        """Build the in-process CollectorRuntime backed by HTTPBackend.
 
-        # Built-in collector: CollectorRuntime driving a LocalSQLiteBackend.
-        # machine_id is pinned to "local" and HTTP registration is skipped
-        # because the in-process collector writes straight to our DB.
-        from auto_daily_log.models.backends import LocalSQLiteBackend
+        Called after the uvicorn server is listening on the loopback port
+        so the collector's first request (heartbeat / activity POST)
+        succeeds immediately.
+        """
+        from auto_daily_log.models.backends import HTTPBackend
         from auto_daily_log_collector.config import CollectorConfig
         from auto_daily_log_collector.enricher import ActivityEnricher
         from auto_daily_log_collector.platforms import create_adapter
@@ -59,9 +57,30 @@ class Application:
         m = self.config.monitor
         data_dir = self.config.system.resolved_data_dir
         screenshot_dir = data_dir / "screenshots"
+        server_url = f"http://127.0.0.1:{self.config.server.port}"
+
+        if not self._builtin_token:
+            raise RuntimeError(
+                "Built-in collector token missing — "
+                "_register_builtin_collector must run before _make_builtin_collector"
+            )
+
+        backend = HTTPBackend(
+            server_url=server_url,
+            token=self._builtin_token,
+            queue_dir=data_dir / "queue-local",
+        )
+        adapter = create_adapter()
+        enricher = ActivityEnricher(
+            screenshot_dir=screenshot_dir,
+            hostile_apps_applescript=m.hostile_apps_applescript,
+            hostile_apps_screenshot=m.hostile_apps_screenshot,
+            phash_enabled=m.phash_enabled,
+            phash_threshold=m.phash_threshold,
+        )
 
         collector_config = CollectorConfig(
-            server_url="http://builtin.local",  # unused when skip_http_register
+            server_url=server_url,
             name="Built-in (this machine)",
             interval_sec=m.interval_sec,
             ocr_enabled=m.ocr_enabled,
@@ -77,24 +96,39 @@ class Application:
             data_dir=str(data_dir),
         )
 
-        adapter = create_adapter()
-        enricher = ActivityEnricher(
-            screenshot_dir=screenshot_dir,
-            hostile_apps_applescript=m.hostile_apps_applescript,
-            hostile_apps_screenshot=m.hostile_apps_screenshot,
-            phash_enabled=m.phash_enabled,
-            phash_threshold=m.phash_threshold,
-        )
-        backend = LocalSQLiteBackend(self.db)
-
-        self.monitor = CollectorRuntime(
+        return CollectorRuntime(
             config=collector_config,
             backend=backend,
             adapter=adapter,
             enricher=enricher,
             machine_id="local",
+            # DB row already UPSERTed in _register_builtin_collector with
+            # the correct token_hash; skip the HTTP /collectors/register
+            # round-trip (which would rotate the token and break auth).
             skip_http_register=True,
         )
+
+    async def _wait_for_server_ready(self, port: int, timeout: float = 10.0) -> bool:
+        """Poll loopback TCP until uvicorn is accepting connections.
+
+        200ms tick; returns True once a connection succeeds, False on
+        timeout. Caller decides what to do on failure (typically: warn
+        and skip the built-in collector rather than hang the server).
+        """
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            try:
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                return True
+            except (ConnectionRefusedError, OSError):
+                await asyncio.sleep(0.2)
+        return False
 
     async def _register_builtin_collector(self) -> None:
         """Auto-register the built-in monitor as collector machine_id='local'.
@@ -231,12 +265,14 @@ class Application:
 
     async def run(self) -> None:
         await self._init_db()
-        await self._init_monitor()
-        self._init_scheduler()
 
-        # Auto-register built-in collector (machine_id='local') iff monitor is on
-        if self.monitor is not None:
+        # Mint/load built-in token + UPSERT collectors row BEFORE the
+        # uvicorn loop starts so /api/ingest/* authentication already
+        # recognises the in-process collector on its very first request.
+        if self.config.monitor.enabled:
             await self._register_builtin_collector()
+
+        self._init_scheduler()
 
         app = create_app(self.db)
         app.state.config = self.config
@@ -250,19 +286,6 @@ class Application:
         if emb_engine:
             app.state.searcher = Searcher(self.db, emb_engine)
 
-        monitor_task = None
-        watchdog = None
-        watchdog_task = None
-        if self.monitor is not None:
-            # CollectorRuntime.run() replaces the old MonitorService.start().
-            monitor_task = asyncio.create_task(self.monitor.run())
-            from auto_daily_log_collector.monitor_internals.watchdog import WecomWatchdog
-            dump_dir = self.config.system.resolved_data_dir / "watchdog"
-            watchdog = WecomWatchdog(self.monitor.trace, dump_dir)
-            watchdog_task = asyncio.create_task(watchdog.start())
-        else:
-            print("[Server] monitor.enabled = false — running in pure-server mode")
-
         config = uvicorn.Config(
             app,
             host=self.config.server.host,
@@ -270,9 +293,36 @@ class Application:
             log_level="info",
         )
         server = uvicorn.Server(config)
+        server_task = asyncio.create_task(server.serve())
+
+        monitor_task = None
+        watchdog = None
+        watchdog_task = None
+
+        if self.config.monitor.enabled:
+            # Wait for uvicorn to bind the loopback port before firing up
+            # the in-process collector — otherwise its first POST races
+            # with bind() and gets ECONNREFUSED.
+            ready = await self._wait_for_server_ready(
+                self.config.server.port, timeout=10.0
+            )
+            if not ready:
+                print(
+                    "[Server] uvicorn did not accept connections within 10s — "
+                    "skipping built-in collector startup (server continues)"
+                )
+            else:
+                self.monitor = self._make_builtin_collector()
+                monitor_task = asyncio.create_task(self.monitor.run())
+                from auto_daily_log_collector.monitor_internals.watchdog import WecomWatchdog
+                dump_dir = self.config.system.resolved_data_dir / "watchdog"
+                watchdog = WecomWatchdog(self.monitor.trace, dump_dir)
+                watchdog_task = asyncio.create_task(watchdog.start())
+        else:
+            print("[Server] monitor.enabled = false — running in pure-server mode")
 
         try:
-            await server.serve()
+            await server_task
         finally:
             if self.monitor is not None:
                 self.monitor.stop()

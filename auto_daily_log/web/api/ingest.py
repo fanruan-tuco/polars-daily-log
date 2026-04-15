@@ -317,6 +317,38 @@ async def heartbeat(
         except json.JSONDecodeError:
             override = None
 
+    # For the built-in 'local' collector, also surface live settings-table
+    # runtime knobs (ocr_enabled / ocr_engine / interval_sec) so UI edits
+    # take effect on the next heartbeat without a restart. Matches the
+    # behaviour the old LocalSQLiteBackend.heartbeat() exposed in-process.
+    if machine_id == "local":
+        db = request.app.state.db
+        rows = await db.fetch_all(
+            "SELECT key, value FROM settings WHERE key IN "
+            "('monitor_ocr_enabled', 'monitor_ocr_engine', 'monitor_interval_sec')"
+        )
+        s = {r["key"]: r["value"] for r in rows}
+        if s:
+            def _bool(val):
+                if val is None:
+                    return None
+                return str(val).lower() in ("true", "1", "yes", "on")
+
+            settings_override: dict = {}
+            if "monitor_ocr_enabled" in s:
+                settings_override["ocr_enabled"] = _bool(s["monitor_ocr_enabled"])
+            if "monitor_ocr_engine" in s and s["monitor_ocr_engine"]:
+                settings_override["ocr_engine"] = s["monitor_ocr_engine"]
+            if "monitor_interval_sec" in s and s["monitor_interval_sec"]:
+                try:
+                    settings_override["interval_sec"] = int(s["monitor_interval_sec"])
+                except (TypeError, ValueError):
+                    pass
+            if settings_override:
+                # Merge: collector-row config_override wins over settings
+                merged = {**settings_override, **(override or {})}
+                override = merged
+
     return HeartbeatResponse(
         server_time=datetime.now().isoformat(timespec="seconds"),
         config_override=override,
