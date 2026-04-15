@@ -17,9 +17,23 @@ async def machines_status(request: Request):
     If no clear primary exists, it is False for all rows.
     """
     db = request.app.state.db
+    # collectors.last_seen is only bumped on handshake (unreliable).
+    # Use MAX(activities.timestamp) per machine as the true "last seen"
+    # since activity ingest is the live signal.
     rows = await db.fetch_all(
-        "SELECT machine_id, name, last_seen FROM collectors "
-        "WHERE is_active = 1 ORDER BY last_seen DESC"
+        """
+        SELECT c.machine_id, c.name,
+               COALESCE(a.last_activity, c.last_seen) AS last_seen
+        FROM collectors c
+        LEFT JOIN (
+            SELECT machine_id, MAX(timestamp) AS last_activity
+            FROM activities
+            WHERE deleted_at IS NULL
+            GROUP BY machine_id
+        ) a ON a.machine_id = c.machine_id
+        WHERE c.is_active = 1
+        ORDER BY last_seen DESC
+        """
     )
 
     # Identify primary via the built-in "local" machine_id used by the
