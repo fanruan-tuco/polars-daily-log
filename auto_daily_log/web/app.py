@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from ..models.database import Database
-from .api import settings, issues, activities, worklogs, dashboard, git_repos, search, ingest
+from .api import settings, issues, activities, worklogs, dashboard, git_repos, search, ingest, feedback
 
 def create_app(db: Database) -> FastAPI:
     app = FastAPI(title="Polars Daily Log", version="0.1.0")
@@ -13,6 +13,7 @@ def create_app(db: Database) -> FastAPI:
     app.include_router(git_repos.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
     app.include_router(ingest.router, prefix="/api")
+    app.include_router(feedback.router, prefix="/api")
     from fastapi.staticfiles import StaticFiles
     from pathlib import Path
     frontend_dist = Path(__file__).parent.parent.parent / "web" / "frontend" / "dist"

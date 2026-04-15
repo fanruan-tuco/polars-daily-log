@@ -88,21 +88,30 @@ class WorklogSummarizer:
             (target_date,),
         )
 
-        issue_entries = []
-        total_time_sec = 0
+        # LLM sometimes ignores "同一 issue_key 合并为一条"; enforce in code.
+        merged: dict[str, dict] = {}
         for item in parsed:
             try:
                 hours = float(item.get("time_spent_hours", 0))
             except (TypeError, ValueError):
                 continue
-            time_sec = int(hours * 3600)
-            total_time_sec += time_sec
-            issue_entries.append({
-                "issue_key": item.get("issue_key", "OTHER"),
-                "time_spent_hours": hours,
-                "summary": item.get("summary", ""),
-                "jira_worklog_id": None,
-            })
+            key = item.get("issue_key", "OTHER") or "OTHER"
+            summary_text = (item.get("summary") or "").strip()
+            if key in merged:
+                merged[key]["time_spent_hours"] = round(merged[key]["time_spent_hours"] + hours, 2)
+                if summary_text:
+                    existing = merged[key]["summary"]
+                    merged[key]["summary"] = f"{existing}；{summary_text}" if existing else summary_text
+            else:
+                merged[key] = {
+                    "issue_key": key,
+                    "time_spent_hours": round(hours, 2),
+                    "summary": summary_text,
+                    "jira_worklog_id": None,
+                }
+
+        issue_entries = list(merged.values())
+        total_time_sec = int(sum(e["time_spent_hours"] for e in issue_entries) * 3600)
 
         activity_ids = [a["id"] for a in activities]
         commit_ids = [c["id"] for c in commits]

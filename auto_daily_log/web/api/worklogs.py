@@ -354,23 +354,12 @@ async def approve_all(request: Request, date: str = Query(default=None)):
     return {"status": "all_approved", "count": len(drafts)}
 
 async def _get_jira_client(db):
-    """Build JiraClient from settings."""
-    jira_url = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_server_url'") or {}).get("value", "")
-    jira_pat = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_pat'") or {}).get("value", "")
-    jira_cookie = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_cookie'") or {}).get("value", "")
-    jira_auth_mode = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_auth_mode'") or {}).get("value", "cookie")
-
-    if not jira_url:
-        raise HTTPException(400, "Jira Server URL not configured in Settings.")
-    if jira_auth_mode == "cookie" and not jira_cookie:
-        raise HTTPException(400, "Jira Cookie not configured. Go to Settings → Jira to set it.")
-    if jira_auth_mode == "bearer" and not jira_pat:
-        raise HTTPException(400, "Jira PAT not configured in Settings.")
-
-    from ...config import JiraConfig
-    from ...jira_client.client import JiraClient
-    jira_config = JiraConfig(server_url=jira_url, pat=jira_pat, auth_mode=jira_auth_mode, cookie=jira_cookie)
-    return JiraClient(jira_config)
+    """Build JiraClient from settings (thin wrapper that translates to HTTPException)."""
+    from ...jira_client.client import MissingJiraConfig, build_jira_client_from_db
+    try:
+        return await build_jira_client_from_db(db)
+    except MissingJiraConfig as e:
+        raise HTTPException(400, str(e))
 
 
 async def _get_started_timestamp(db, draft_date: str) -> str:

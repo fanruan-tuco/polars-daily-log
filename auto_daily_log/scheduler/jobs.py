@@ -3,7 +3,7 @@ import re
 from datetime import date, datetime
 from typing import Optional
 
-from ..config import AutoApproveConfig, JiraConfig
+from ..config import AutoApproveConfig
 from ..models.database import Database
 from ..summarizer.engine import LLMEngine
 from ..summarizer.prompt import DEFAULT_AUTO_APPROVE_PROMPT, render_prompt
@@ -81,22 +81,12 @@ class DailyWorkflow:
         if not drafts:
             return
 
-        jira_url = await self._db.fetch_one("SELECT value FROM settings WHERE key = 'jira_server_url'")
-        jira_pat = await self._db.fetch_one("SELECT value FROM settings WHERE key = 'jira_pat'")
-        jira_cookie = await self._db.fetch_one("SELECT value FROM settings WHERE key = 'jira_cookie'")
-        jira_auth_mode = await self._db.fetch_one("SELECT value FROM settings WHERE key = 'jira_auth_mode'")
-
-        url_val = (jira_url or {}).get("value", "")
-        pat_val = (jira_pat or {}).get("value", "")
-        cookie_val = (jira_cookie or {}).get("value", "")
-        auth_mode_val = (jira_auth_mode or {}).get("value", "cookie")
-
-        if not url_val:
+        from ..jira_client.client import MissingJiraConfig, build_jira_client_from_db
+        try:
+            jira = await build_jira_client_from_db(self._db)
+        except MissingJiraConfig:
+            # Scheduler runs in background — silent skip if Jira isn't set up yet.
             return
-
-        from ..jira_client.client import JiraClient
-        jira_config = JiraConfig(server_url=url_val, pat=pat_val, auth_mode=auth_mode_val, cookie=cookie_val)
-        jira = JiraClient(jira_config)
 
         for draft in drafts:
             try:
