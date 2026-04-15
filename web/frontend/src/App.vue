@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
   left: 0;
   width: 220px;
   height: 100vh;
-  background: var(--bg-soft);
+  background: #f3f3f3;       /* mock sidebar bg — one shade deeper than --bg-soft */
   border-right: 1px solid var(--line);
   z-index: 100;
   overflow: hidden;

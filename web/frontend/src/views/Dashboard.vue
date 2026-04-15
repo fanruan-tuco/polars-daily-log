@@ -487,7 +487,7 @@ onMounted(loadData)
 }
 
 .timeline-body {
-  /* Let TimelineChart own its height */
+  height: 200px;  /* Fixed height so preserveAspectRatio="none" works correctly */
 }
 
 /* ───── Drafts list ───── */

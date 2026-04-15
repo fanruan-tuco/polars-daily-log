@@ -39,7 +39,8 @@
       v-else
       class="tl-svg"
       :viewBox="`0 0 ${VB_W} ${VB_H}`"
-      preserveAspectRatio="xMidYMax meet"
+      preserveAspectRatio="none"
+      style="width:100%;height:100%;"
       @mouseleave="hideTooltip"
     >
       <!-- Loading skeleton -->
@@ -56,7 +57,7 @@
         />
       </g>
 
-      <!-- Bars: ONE bar per bucket. active→black, idle-only→gray, same width -->
+      <!-- Bars: stacked per bucket. Gray idle at bottom, black active on top -->
       <g v-else class="tl-bars" :style="{ transform: `translateX(${shiftPx}px)` }">
         <g
           v-for="(b, idx) in buckets"
@@ -66,47 +67,38 @@
           :style="idx === 0 && shifting ? { opacity: 0 } : {}"
           @mouseenter="(e) => showTooltip(e, b, idx)"
         >
-          <!-- Has activity → black bar -->
-          <g
-            v-if="(b.active_mins || 0) > 0"
-            class="tl-bar tl-bar-active"
-            :class="{ 'tl-bar-pulse': idx === buckets.length - 1 }"
-            :style="{ transform: `scaleY(${activeScale(b)})` }"
-          >
-            <rect
-              :x="BAR_GAP"
-              :y="VB_H - PAD_BOTTOM - chartHeight"
-              :width="barW"
-              :height="chartHeight"
-              rx="1.5"
-              fill="var(--ink)"
-            />
-          </g>
-
-          <!-- Idle-only (no activity) → gray bar, same width -->
-          <g
-            v-else-if="(b.idle_mins || 0) > 0"
+          <!-- Idle segment (gray, drawn first = behind) -->
+          <rect
+            v-if="(b.idle_mins || 0) > 0"
             class="tl-bar tl-bar-idle"
-            :style="{ transform: `scaleY(${idleScale(b)})` }"
-          >
-            <rect
-              :x="BAR_GAP"
-              :y="VB_H - PAD_BOTTOM - chartHeight"
-              :width="barW"
-              :height="chartHeight"
-              rx="1.5"
-              fill="var(--ink)"
-              fill-opacity="0.22"
-            />
-          </g>
+            :x="BAR_GAP"
+            :y="VB_H - PAD_BOTTOM - idlePx(b)"
+            :width="barW"
+            :height="idlePx(b)"
+            rx="1.5"
+            fill="var(--ink)"
+            fill-opacity="0.22"
+          />
+
+          <!-- Active segment (black, stacked on top of idle) -->
+          <rect
+            v-if="(b.active_mins || 0) > 0"
+            :class="['tl-bar', 'tl-bar-active', { 'tl-bar-pulse': idx === buckets.length - 1 }]"
+            :x="BAR_GAP"
+            :y="VB_H - PAD_BOTTOM - idlePx(b) - activePx(b)"
+            :width="barW"
+            :height="activePx(b)"
+            rx="1.5"
+            fill="var(--ink)"
+          />
 
           <!-- Empty → invisible hit area -->
           <rect
-            v-else
+            v-if="(b.active_mins || 0) === 0 && (b.idle_mins || 0) === 0"
             :x="BAR_GAP"
-            :y="VB_H - PAD_BOTTOM - 20"
+            :y="VB_H - PAD_BOTTOM - 4"
             :width="barW"
-            :height="20"
+            :height="4"
             fill="transparent"
           />
         </g>
@@ -236,16 +228,32 @@ function barMode(b) {
   return 'empty'
 }
 
+// Max total (active + idle) across all buckets — used as the 100% height reference
+const maxTotal = computed(() => {
+  let m = 0
+  for (const b of buckets.value) {
+    const t = (b.active_mins || 0) + (b.idle_mins || 0)
+    if (t > m) m = t
+  }
+  return m || 1
+})
+
+// Pixel heights for stacked bars (direct px, no scaleY transform)
+function activePx(b) {
+  return ((b.active_mins || 0) / maxTotal.value) * chartHeight * 0.92
+}
+
+function idlePx(b) {
+  return ((b.idle_mins || 0) / maxTotal.value) * chartHeight * 0.92
+}
+
+// Keep these for tooltip barMode check
 function activeScale(b) {
-  if (maxActive.value <= 0) return 0
-  const k = (b.active_mins / maxActive.value) * 0.9
-  return Math.max(0.01, k)
+  return maxActive.value > 0 ? (b.active_mins / maxActive.value) * 0.9 : 0
 }
 
 function idleScale(b) {
-  // Idle-only buckets: scale relative to bucket size (max = full height)
-  const k = Math.min(1, (b.idle_mins || 0) / props.bucketMinutes) * 0.5
-  return Math.max(0.05, k)
+  return Math.min(1, (b.idle_mins || 0) / props.bucketMinutes) * 0.5
 }
 
 // Cursor position inside the window
