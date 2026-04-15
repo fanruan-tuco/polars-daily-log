@@ -561,15 +561,16 @@ onMounted(loadData)
 .activities-header,
 .activities-row {
   display: grid;
-  grid-template-columns: 60px 120px 1fr 1fr 50px;
-  gap: 12px;
+  /* Mock proportions: time 50 / app 100 / window ~1fr / summary ~1.6fr / machine 80 */
+  grid-template-columns: 50px 100px 1fr 1.6fr 80px;
+  gap: 10px;
   align-items: center;
-  padding: 6px 4px;
+  padding: 5px 4px;
 }
 
 .activities-header {
   border-bottom: 1px solid var(--line);
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   font-size: 11px;
   color: var(--ink-muted);
   font-weight: 500;
@@ -580,7 +581,7 @@ onMounted(loadData)
   font-size: 13px;
   color: var(--ink);
   transition: background 0.15s ease;
-  line-height: 1.4;
+  line-height: 1.3;
 }
 
 .activities-row:last-child {
@@ -593,11 +594,16 @@ onMounted(loadData)
 
 .col {
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .col-machine {
   text-align: right;
   color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .col-summary {
@@ -608,16 +614,14 @@ onMounted(loadData)
   color: var(--ink-soft);
 }
 
+.col-app {
+  font-weight: 500;
+}
+
 .mono {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-muted);
-}
-
-.truncate {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ───── Responsive: sidebar layout gives ~1200px max ───── */
