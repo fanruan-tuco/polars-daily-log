@@ -56,7 +56,7 @@
         />
       </g>
 
-      <!-- Bars: active = wide black bar, idle = narrow gray bar next to it -->
+      <!-- Bars: ONE bar per bucket. active→black, idle-only→gray, same width -->
       <g v-else class="tl-bars" :style="{ transform: `translateX(${shiftPx}px)` }">
         <g
           v-for="(b, idx) in buckets"
@@ -66,7 +66,7 @@
           :style="idx === 0 && shifting ? { opacity: 0 } : {}"
           @mouseenter="(e) => showTooltip(e, b, idx)"
         >
-          <!-- Active bar — wide, solid black -->
+          <!-- Has activity → black bar -->
           <g
             v-if="(b.active_mins || 0) > 0"
             class="tl-bar tl-bar-active"
@@ -76,23 +76,23 @@
             <rect
               :x="BAR_GAP"
               :y="VB_H - PAD_BOTTOM - chartHeight"
-              :width="activeW"
+              :width="barW"
               :height="chartHeight"
               rx="1.5"
               fill="var(--ink)"
             />
           </g>
 
-          <!-- Idle bar — narrow gray, sits to the right of active (or fills slot if idle-only) -->
+          <!-- Idle-only (no activity) → gray bar, same width -->
           <g
-            v-if="(b.idle_mins || 0) > 0"
+            v-else-if="(b.idle_mins || 0) > 0"
             class="tl-bar tl-bar-idle"
             :style="{ transform: `scaleY(${idleScale(b)})` }"
           >
             <rect
-              :x="(b.active_mins || 0) > 0 ? BAR_GAP + activeW + 1 : BAR_GAP"
+              :x="BAR_GAP"
               :y="VB_H - PAD_BOTTOM - chartHeight"
-              :width="(b.active_mins || 0) > 0 ? idleW : activeW"
+              :width="barW"
               :height="chartHeight"
               rx="1.5"
               fill="var(--ink)"
@@ -100,12 +100,12 @@
             />
           </g>
 
-          <!-- Empty bucket — invisible hit area -->
+          <!-- Empty → invisible hit area -->
           <rect
-            v-if="(b.active_mins || 0) === 0 && (b.idle_mins || 0) === 0"
+            v-else
             :x="BAR_GAP"
             :y="VB_H - PAD_BOTTOM - 20"
-            :width="Math.max(2, bucketPxWidth - BAR_GAP * 2)"
+            :width="barW"
             :height="20"
             fill="transparent"
           />
@@ -207,9 +207,8 @@ const expectedBucketCount = computed(() =>
 )
 const bucketPxWidth = computed(() => VB_W / expectedBucketCount.value)
 
-// Bar widths: active gets ~75% of slot, idle gets ~25% (only visible when mixed)
-const activeW = computed(() => Math.max(2, Math.floor((bucketPxWidth.value - BAR_GAP * 2) * 0.75)))
-const idleW = computed(() => Math.max(2, bucketPxWidth.value - BAR_GAP * 2 - activeW.value - 1))
+// Full bar width = bucket slot minus gaps on each side
+const barW = computed(() => Math.max(3, bucketPxWidth.value - BAR_GAP * 2))
 
 const maxActive = computed(() => {
   let m = 0
