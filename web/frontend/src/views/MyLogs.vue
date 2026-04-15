@@ -39,7 +39,7 @@
       </div>
     </div>
 
-    <!-- Filter tabs: 今日 | 历史 (hover to expand sub-options) -->
+    <!-- Filter tabs: 今日 | 历史 (hover to inline-expand sub-options) -->
     <div class="toolbar">
       <div class="tag-filters">
         <!-- 今日 = daily draft for today -->
@@ -50,9 +50,10 @@
           今日
         </button>
 
-        <!-- 历史 hover-reveal panel -->
+        <!-- 历史 + inline expansion -->
         <div
           class="history-wrap"
+          :class="{ open: historyOpen }"
           @mouseenter="openHistory"
           @mouseleave="scheduleCloseHistory"
         >
@@ -61,17 +62,13 @@
             @click="toggleHistoryOpen"
           >
             历史
-            <span class="caret" aria-hidden="true">▾</span>
           </button>
-          <div
-            class="history-panel"
-            :class="{ open: historyOpen }"
-            @mouseenter="cancelCloseHistory"
-          >
+          <div class="history-inline">
             <button
-              v-for="t in historyFilters"
+              v-for="(t, i) in historyFilters"
               :key="t.value"
               :class="['history-chip', { active: activeTag === t.value && !isToday }]"
+              :style="{ transitionDelay: historyOpen ? `${i * 45}ms` : '0ms' }"
               @click="selectHistory(t.value)"
             >
               {{ t.label }}
@@ -701,8 +698,12 @@ onMounted(() => { loadJiraContext(); loadDrafts() })
 .primary-tab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 7px 18px;
+  height: 34px;
+  padding: 0 18px;
+  box-sizing: border-box;
+  line-height: 1;
   border-radius: 999px;
   background: transparent;
   border: 1px solid var(--line);
@@ -725,67 +726,62 @@ onMounted(() => { loadJiraContext(); loadDrafts() })
   border-color: var(--ink);
 }
 
-.primary-tab .caret {
-  font-size: 10px;
-  opacity: 0.6;
-  transition: transform 0.2s ease;
-}
-
+/* 历史 wrap: inline expansion — chips slide out horizontally on hover */
 .history-wrap {
-  position: relative;
-  padding-bottom: 8px;  /* extends hover area so dropdown doesn't flicker */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.history-wrap:hover .caret,
-.primary-tab.active .caret {
-  opacity: 1;
-}
-
-.history-panel {
-  position: absolute;
-  top: calc(100% + 0px);
-  left: 0;
-  display: flex;
+.history-inline {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  padding: 8px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  /* Collapsed: zero width + no padding; chips themselves are also hidden */
+  max-width: 0;
   opacity: 0;
-  transform: translateY(-6px);
-  pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  white-space: nowrap;
-  z-index: 10;
+  transition: max-width 0.32s ease, opacity 0.2s ease;
 }
 
-.history-panel.open {
+.history-wrap.open .history-inline {
+  max-width: 520px;   /* enough to fit all 5 chips */
   opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
 }
 
 .history-chip {
-  padding: 6px 14px;
+  height: 30px;
+  padding: 0 14px;
   border-radius: 999px;
-  background: transparent;
-  border: none;
+  background: var(--bg);
+  border: 1px solid var(--line);
   color: var(--ink-soft);
   font-size: 13px;
   font-family: inherit;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+  /* Staggered per-chip slide-in */
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+              opacity 0.25s ease, transform 0.25s ease;
+}
+
+.history-wrap.open .history-chip {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .history-chip:hover {
-  background: var(--bg-soft);
+  border-color: var(--ink-muted);
   color: var(--ink);
 }
 
 .history-chip.active {
   background: var(--ink);
   color: #fff;
+  border-color: var(--ink);
 }
 
 /* ───── Empty state ───── */
