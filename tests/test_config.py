@@ -13,13 +13,13 @@ monitor:
   interval_sec: 60
   ocr_enabled: false
 llm:
-  engine: openai
+  engine: anthropic
 """)
     config = load_config(str(config_file))
     assert config.server.port == 9090
     assert config.monitor.interval_sec == 60
     assert config.monitor.ocr_enabled is False
-    assert config.llm.engine == "openai"
+    assert config.llm.engine == "anthropic"
 
 
 def test_load_config_with_defaults():
@@ -27,7 +27,7 @@ def test_load_config_with_defaults():
     assert config.server.port == 8080
     assert config.monitor.interval_sec == 30
     assert config.monitor.ocr_enabled is True
-    assert config.llm.engine == "kimi"
+    assert config.llm.engine == "openai_compat"
     assert config.scheduler.trigger_time == "18:00"
     assert config.auto_approve.enabled is True
     assert config.auto_approve.trigger_time == "21:30"

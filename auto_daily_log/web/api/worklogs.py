@@ -116,10 +116,10 @@ async def _get_llm_engine_from_settings(db):
     saves first-run setup friction.
     """
     from ...config import LLMConfig, LLMProviderConfig
-    from ...summarizer.engine import get_llm_engine, resolve_protocol
+    from ...summarizer.engine import VALID_PROTOCOLS, get_llm_engine
     from ...summarizer.url_helper import normalize_base_url
 
-    engine_name = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_engine'") or {}).get("value", "") or "kimi"
+    protocol = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_engine'") or {}).get("value", "") or "openai_compat"
     api_key = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_api_key'") or {}).get("value", "")
     model = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_model'") or {}).get("value", "")
     base_url = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_base_url'") or {}).get("value", "")
@@ -127,28 +127,28 @@ async def _get_llm_engine_from_settings(db):
     # Built-in Kimi fallback — if user hasn't configured anything, use this
     BUILTIN_KIMI_KEY = "sk-kimi-zzkJewX4KnmDC0vtysSALlszHodfjfhOIvnqb8aWuUrh7oNPezXpr9ZgEWiOjdrr"
     if not api_key:
-        engine_name = "kimi"
+        protocol = "openai_compat"
         api_key = BUILTIN_KIMI_KEY
 
-    protocol = resolve_protocol(engine_name)
+    if protocol not in VALID_PROTOCOLS:
+        protocol = "openai_compat"
+
     default_url = {
-        "openai_compat": "https://api.moonshot.cn/v1",  # Kimi default
+        "openai_compat": "https://api.moonshot.cn/v1",
         "anthropic": "https://api.anthropic.com",
         "ollama": "http://localhost:11434",
-    }.get(protocol, "")
+    }[protocol]
     default_model = {
         "openai_compat": "moonshot-v1-8k",
         "anthropic": "claude-sonnet-4-20250514",
         "ollama": "llama3",
-    }.get(protocol, "")
+    }[protocol]
 
     model = model or default_model
-    base_url = normalize_base_url(base_url, engine=engine_name) or default_url
+    base_url = normalize_base_url(base_url, engine=protocol) or default_url
 
     provider = LLMProviderConfig(api_key=api_key, model=model, base_url=base_url)
-    # Route provider config into whichever slot the legacy schema expects.
-    slot = engine_name if engine_name in ("kimi", "openai", "claude", "ollama") else "kimi"
-    config = LLMConfig(engine=engine_name, **{slot: provider})
+    config = LLMConfig(engine=protocol, **{protocol: provider})
     return get_llm_engine(config)
 
 

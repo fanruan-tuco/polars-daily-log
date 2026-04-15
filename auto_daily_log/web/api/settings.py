@@ -132,21 +132,23 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
 async def check_llm_key(body: LLMCheckRequest):
     """Validate LLM API key by making a minimal test call.
 
-    `body.engine` can be either a legacy value (kimi/openai/claude) or
-    the canonical protocol (openai_compat/anthropic/ollama).
+    `body.engine` must be one of: openai_compat / anthropic / ollama.
     """
-    from ...summarizer.engine import resolve_protocol
+    from ...summarizer.engine import VALID_PROTOCOLS
     from ...summarizer.url_helper import normalize_base_url
 
-    protocol = resolve_protocol(body.engine)
+    protocol = (body.engine or "").lower()
+    if protocol not in VALID_PROTOCOLS:
+        return {"valid": False, "message": f"Unknown protocol: {body.engine}"}
+
     default_url = {
         "openai_compat": "https://api.openai.com/v1",
         "anthropic": "https://api.anthropic.com",
         "ollama": "http://localhost:11434",
-    }.get(protocol, "")
+    }[protocol]
 
     model = body.model or ""
-    base_url = normalize_base_url(body.base_url, engine=body.engine) or default_url
+    base_url = normalize_base_url(body.base_url, engine=protocol) or default_url
     if not base_url:
         return {"valid": False, "message": "Base URL 为空，无法连接"}
 
@@ -349,8 +351,8 @@ async def put_setting(key: str, body: SettingUpdate, request: Request):
     if key == "llm_base_url":
         from ...summarizer.url_helper import normalize_base_url
         engine_row = await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_engine'")
-        engine = engine_row["value"] if engine_row else None
-        value = normalize_base_url(value, engine=engine)
+        protocol = engine_row["value"] if engine_row else None
+        value = normalize_base_url(value, engine=protocol)
     existing = await db.fetch_one("SELECT key FROM settings WHERE key = ?", (key,))
     if existing:
         await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = ?", (value, key))

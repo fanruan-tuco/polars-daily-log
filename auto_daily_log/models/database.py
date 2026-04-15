@@ -184,6 +184,14 @@ class Database:
         if "is_paused" not in col_col_names:
             await self._conn.execute("ALTER TABLE collectors ADD COLUMN is_paused INTEGER DEFAULT 0")
 
+        # Normalize legacy llm_engine values to canonical protocols
+        await self._conn.execute(
+            "UPDATE settings SET value='openai_compat' WHERE key='llm_engine' AND value IN ('kimi','openai')"
+        )
+        await self._conn.execute(
+            "UPDATE settings SET value='anthropic' WHERE key='llm_engine' AND value='claude'"
+        )
+
         await self._conn.commit()
 
     async def close(self) -> None:

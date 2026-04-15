@@ -6,8 +6,7 @@ import httpx
 from ..config import LLMConfig, LLMProviderConfig, EmbeddingConfig
 
 _DEFAULT_MODELS = {
-    "kimi": ("moonshot-v1-embedding", 1024),
-    "openai": ("text-embedding-3-small", 1536),
+    "openai_compat": ("moonshot-v1-embedding", 1024),
     "ollama": ("nomic-embed-text", 768),
 }
 
@@ -79,17 +78,14 @@ def get_embedding_engine(
     if not emb_config.enabled:
         return None
 
-    engine_name = llm_config.engine.lower()
-    default_model, default_dims = _DEFAULT_MODELS.get(engine_name, ("", 1536))
+    protocol = llm_config.engine.lower()
+    default_model, default_dims = _DEFAULT_MODELS.get(protocol, ("", 1536))
     model = emb_config.model or default_model
     dimensions = emb_config.dimensions or default_dims
 
-    if engine_name == "kimi":
-        return OpenAICompatibleEmbedding(llm_config.kimi, model, dimensions)
-    elif engine_name == "openai":
-        return OpenAICompatibleEmbedding(llm_config.openai, model, dimensions)
-    elif engine_name == "ollama":
+    if protocol == "openai_compat":
+        return OpenAICompatibleEmbedding(llm_config.openai_compat, model, dimensions)
+    if protocol == "ollama":
         return OllamaEmbedding(llm_config.ollama, model, dimensions)
-    elif engine_name == "claude":
-        return None
+    # anthropic: no embedding endpoint
     return None
