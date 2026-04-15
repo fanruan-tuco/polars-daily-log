@@ -443,7 +443,7 @@ onMounted(loadData)
 .split-row {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
-  gap: 12px;
+  gap: 20px;
   margin-bottom: 24px;
 }
 
