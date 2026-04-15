@@ -2,6 +2,8 @@
 name = "auto-daily-log"
 version = "0.2.0"
 description = "Automated Jira worklog tool with activity monitoring and LLM summarization"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 dependencies = [
     "fastapi>=0.104.0",
