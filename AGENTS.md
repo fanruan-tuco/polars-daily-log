@@ -83,6 +83,13 @@ Collector 与 Server 之间通过 HTTP 协议通信，任意平台都能做 Coll
 - 确认弹窗用 Element Plus 的 `el-popconfirm`，Toast 用 `ElMessage`（1.5s 自动消失 + 点击关闭）
 - 页面顶部只放"这个页面干什么"的一句话，工具栏/过滤器放在页面次级位置
 
+### Jira 兼容性
+
+- fanruan.com 的 Jira 后端 MySQL collation 不是 utf8mb4，worklog comment
+  含 emoji 或 BMP 以外的 CJK 补充字符，POST 会返回 HTTP 500 + `内部服务器错误`
+- 构造 JiraClient 与 worklog 提交的唯一入口：`jira_client.client.build_jira_client_from_db(db)` + `JiraClient.submit_worklog`
+- `_build_worklog_payload` 已内置 4-byte UTF-8 scrub，**不要绕开 JiraClient 直接 HTTP POST**；也不要在调用侧再组 payload
+
 ### 隐私
 
 - `monitor.privacy.blocked_apps` / `blocked_urls` 必须严格尊重

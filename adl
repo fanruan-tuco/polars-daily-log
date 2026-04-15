@@ -336,6 +336,70 @@ do_install() {
     bash "$SCRIPT_DIR/install.sh"
 }
 
+# One-shot rebuild: refresh Python deps + rebuild frontend dist + verify.
+# Use after pull when dependencies change (adds marked, refactored imports, etc.).
+do_build() {
+    local restart=0 skip_py=0 skip_fe=0
+    while (($# > 0)); do
+        case "$1" in
+            --restart)     restart=1 ;;
+            --no-python)   skip_py=1 ;;
+            --no-frontend) skip_fe=1 ;;
+            *) err "Unknown build option: $1"; exit 2 ;;
+        esac
+        shift
+    done
+
+    [[ -d "$VENV_DIR" ]] || { err "Virtual env missing. Run './adl install' first."; exit 1; }
+    activate_venv
+
+    local platform
+    case "$(uname -s)" in
+        Darwin) platform="macos" ;;
+        Linux)  platform="linux" ;;
+        MINGW*|MSYS*|CYGWIN*)
+            err "Native Windows not supported by this script. Use WSL2 + run './adl build' inside."
+            exit 1 ;;
+        *) err "Unsupported platform: $(uname -s)"; exit 1 ;;
+    esac
+
+    if (( ! skip_py )); then
+        info "Refreshing Python deps (${platform}) ..."
+        pip install --upgrade pip -q 2>/dev/null || true
+        pip install -e ".[$platform]" -q 2>&1 | tail -3
+        # Smoke-test core imports (same list install.sh verifies)
+        python -c "import aiosqlite, sqlite_vec, fastapi, uvicorn, httpx, apscheduler, pydantic, yaml, imagehash, PIL" \
+            2>/dev/null && ok "Python core imports OK" \
+            || { err "Missing Python dep after install — check 'pip install -e .[$platform]' output above"; exit 1; }
+    fi
+
+    if (( ! skip_fe )); then
+        local fe_dir="$SCRIPT_DIR/web/frontend"
+        [[ -d "$fe_dir" ]] || { err "Frontend dir not found: $fe_dir"; exit 1; }
+        command -v node >/dev/null 2>&1 || { err "Node.js not installed. Install Node 18+ first."; exit 1; }
+
+        # Reinstall node_modules only if package-lock is newer than node_modules
+        if [[ ! -d "$fe_dir/node_modules" ]] || [[ "$fe_dir/package-lock.json" -nt "$fe_dir/node_modules" ]]; then
+            info "Installing npm deps ..."
+            (cd "$fe_dir" && npm install --silent 2>&1 | tail -3)
+        else
+            ok "npm deps up-to-date (node_modules newer than lockfile)"
+        fi
+
+        info "Building frontend ..."
+        (cd "$fe_dir" && npm run build 2>&1 | tail -3)
+        ok "Frontend built: $fe_dir/dist/"
+    fi
+
+    if (( restart )); then
+        info "Restarting server ..."
+        server_stop || true
+        server_start
+    else
+        warn "Server not restarted. Run './adl server restart' to pick up backend changes, or re-run with --restart"
+    fi
+}
+
 do_clean() {
     info "Removing pid & log files ..."
     rm -f "$SERVER_PIDFILE" "$COLLECTOR_PIDFILE"
@@ -368,7 +432,9 @@ ${BOLD}TOP-LEVEL${NC}
   stop         stop both
   restart      stop both + start both
   status       status of both
-  install      run install.sh
+  install      run install.sh (first-time full setup)
+  build        refresh deps + rebuild frontend (use after pull)
+               options: --restart, --no-python, --no-frontend
   clean        remove pid / log files
   help         show this message
 
@@ -423,6 +489,7 @@ main() {
         restart)  all_stop; sleep 1; all_start ;;
         status)   all_status ;;
         install)  do_install ;;
+        build)    do_build "$@" ;;
         clean)    do_clean ;;
         help|-h|--help) usage ;;
         *)
