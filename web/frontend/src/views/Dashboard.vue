@@ -309,14 +309,14 @@ onMounted(loadData)
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
   gap: 16px;
 }
 
 .page-header-left {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .page-title {
@@ -382,8 +382,8 @@ onMounted(loadData)
 .stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 24px;
 }
 
 .stat-card {
@@ -432,8 +432,8 @@ onMounted(loadData)
 .split-row {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 24px;
 }
 
 /* min-width: 0 is REQUIRED on grid children to prevent long content (e.g.
@@ -561,15 +561,15 @@ onMounted(loadData)
 .activities-header,
 .activities-row {
   display: grid;
-  grid-template-columns: 80px 140px 1fr 1fr 60px;
-  gap: 16px;
+  grid-template-columns: 60px 120px 1fr 1fr 50px;
+  gap: 12px;
   align-items: center;
-  padding: 10px 4px;
+  padding: 6px 4px;
 }
 
 .activities-header {
   border-bottom: 1px solid var(--line);
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   font-size: 11px;
   color: var(--ink-muted);
   font-weight: 500;
@@ -580,6 +580,7 @@ onMounted(loadData)
   font-size: 13px;
   color: var(--ink);
   transition: background 0.15s ease;
+  line-height: 1.4;
 }
 
 .activities-row:last-child {

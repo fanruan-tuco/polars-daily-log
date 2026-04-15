@@ -41,6 +41,7 @@
             :class="{ active: isActive(link.path) }"
             @click="mobileOpen = false"
           >
+            <span class="nav-icon" v-html="link.icon"></span>
             <span class="nav-label">{{ link.label }}</span>
             <span
               v-if="link.badge != null && link.badge > 0"
@@ -50,6 +51,7 @@
           </router-link>
 
           <button class="nav-item nav-item-btn" @click="feedbackOpen = true; mobileOpen = false">
+            <span class="nav-icon" v-html="NAV_ICONS.feedback"></span>
             <span class="nav-label">反馈</span>
           </button>
         </nav>
@@ -243,22 +245,36 @@ async function loadDevices() {
 }
 
 // ─── Nav links with badges ──────────────────────────────────
+// Icon SVGs kept inline & tiny to avoid importing Element Plus icons here.
+// Each matches the mock's 16×16 style at the left of every nav row.
+const NAV_ICONS = {
+  overview: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="1.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="9.5" y="1.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="1.5" y="9.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/><rect x="9.5" y="9.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.3"/></svg>',
+  activities: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+  drafts: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 2h8a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" stroke-width="1.3"/><path d="M6 6h4M6 9h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+  issues: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M8 5v3.5l2.5 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  search: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+  settings: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" stroke-width="1.3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+  feedback: '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 3h12v8H5l-3 3V3z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+}
+
 const navLinks = computed(() => [
-  { path: '/', label: '概览' },
+  { path: '/', label: '概览', icon: NAV_ICONS.overview },
   {
     path: '/activities',
     label: '活动记录',
+    icon: NAV_ICONS.activities,
     badge: activityCount.value || null,
     actionable: false,
   },
   {
     path: '/my-logs',
     label: 'Worklog 草稿',
+    icon: NAV_ICONS.drafts,
     badge: pendingReviewCount.value || null,
     actionable: pendingReviewCount.value > 0,
   },
-  { path: '/issues', label: 'Issues' },
-  { path: '/settings', label: '设置' },
+  { path: '/issues', label: 'Issues', icon: NAV_ICONS.issues },
+  { path: '/settings', label: '设置', icon: NAV_ICONS.settings },
 ])
 
 function isActive(path) {
@@ -407,9 +423,8 @@ onBeforeUnmount(() => {
 .nav-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 10px;
+  padding: 9px 14px;
   border-radius: 8px;
   text-decoration: none;
   color: var(--ink-soft);
@@ -422,6 +437,21 @@ onBeforeUnmount(() => {
   text-align: left;
   font-family: inherit;
   width: 100%;
+}
+
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: inherit;
+  opacity: 0.7;
+}
+
+.nav-item.active .nav-icon {
+  opacity: 1;
 }
 
 .nav-item:hover {
