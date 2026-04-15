@@ -22,7 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 macos = ["pyobjc-framework-Vision>=10.0"]
-windows = ["winocr>=0.1.0"]
+windows = ["winocr>=0.0.14"]
 linux = ["pytesseract>=0.3.10", "Pillow>=10.0"]
 dev = ["pytest>=7.4.0", "pytest-asyncio>=0.23.0", "pytest-httpx>=0.28.0"]
 
