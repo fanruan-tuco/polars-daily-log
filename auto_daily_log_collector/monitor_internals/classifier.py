@@ -71,7 +71,10 @@ _CODE_FILE_PATTERNS = re.compile(
 )
 
 _MEETING_KEYWORDS = re.compile(
-    r"(meeting|standup|retro|sprint|review|daily|sync|huddle|会议|站会|评审)",
+    # Matches phrases strongly associated with meetings. "daily" alone is
+    # too broad — "Polars Daily Log", "daily notes", etc. were misclassified.
+    # Only match when "daily" is followed by a meeting-ish word.
+    r"(meeting|standup|retro|sprint\s+(?:planning|review)|daily\s+(?:standup|sync|scrum|huddle)|huddle|会议|站会|评审)",
     re.IGNORECASE,
 )
 
