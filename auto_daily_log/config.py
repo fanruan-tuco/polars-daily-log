@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class ServerConfig(BaseModel):
-    port: int = 8080
+    port: int = 8888
     host: str = "0.0.0.0"
 
 

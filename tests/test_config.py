@@ -24,7 +24,7 @@ llm:
 
 def test_load_config_with_defaults():
     config = load_config(None)
-    assert config.server.port == 8080
+    assert config.server.port == 8888
     assert config.monitor.interval_sec == 30
     assert config.monitor.ocr_enabled is True
     assert config.llm.engine == "openai_compat"

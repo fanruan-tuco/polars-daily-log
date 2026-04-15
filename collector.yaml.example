@@ -3,7 +3,7 @@
 # Credentials (machine_id + token) are persisted separately after first registration.
 
 # Server connection
-server_url: "http://127.0.0.1:8080"
+server_url: "http://127.0.0.1:8888"
 name: "My-Mac"   # defaults to hostname if omitted
 
 # Sampling

@@ -23,7 +23,7 @@ from shared.schemas import (
 
 class CollectorConfig(BaseModel):
     # Server connection
-    server_url: str = Field(..., description="Central server base URL, e.g. http://10.0.0.5:8080")
+    server_url: str = Field(..., description="Central server base URL, e.g. http://10.0.0.5:8888")
     name: str = Field(default_factory=lambda: socket.gethostname(), description="Display name in UI")
 
     # Sampling
