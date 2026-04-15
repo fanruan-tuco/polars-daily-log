@@ -214,3 +214,171 @@ def test_latest_user_question_picks_last_user_message():
         chat_module.ChatMessage(role="user", text="second"),
     ]
     assert chat_module._latest_user_question(msgs) == "second"
+
+
+# ─── session persistence ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_chat_new_session_is_advertised_as_first_sse_event(app_client, monkeypatch):
+    fake = _FakeLLM(response="hello")
+    _patch_engine(monkeypatch, fake)
+
+    resp = await app_client.post("/api/chat", json={
+        "messages": [{"role": "user", "text": "第一条消息"}],
+    })
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    # First event is the session_id control event
+    assert isinstance(events[0], dict)
+    assert "session_id" in events[0]
+    session_id = events[0]["session_id"]
+    assert len(session_id) == 32  # uuid4 hex
+    assert events[-1] == "[DONE]"
+
+    # Session now appears in the listing
+    list_resp = await app_client.get("/api/chat/sessions")
+    assert list_resp.status_code == 200
+    rows = list_resp.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == session_id
+    assert rows[0]["title"] == "第一条消息"
+    assert rows[0]["message_count"] == 2
+
+    # Messages endpoint returns exactly [user, ai] in order
+    msg_resp = await app_client.get(f"/api/chat/sessions/{session_id}/messages")
+    assert msg_resp.status_code == 200
+    msgs = msg_resp.json()
+    assert len(msgs) == 2
+    assert msgs[0]["role"] == "user"
+    assert msgs[0]["text"] == "第一条消息"
+    assert msgs[1]["role"] == "ai"
+    assert msgs[1]["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_chat_reuses_session_and_appends_messages(app_client, monkeypatch):
+    fake = _FakeLLM(response="first reply")
+    _patch_engine(monkeypatch, fake)
+
+    resp1 = await app_client.post("/api/chat", json={
+        "messages": [{"role": "user", "text": "第一轮"}],
+    })
+    events = _parse_sse(resp1.text)
+    session_id = events[0]["session_id"]
+
+    # Second post carries the same session id → no new session_id event
+    fake2 = _FakeLLM(response="second reply")
+    _patch_engine(monkeypatch, fake2)
+    resp2 = await app_client.post("/api/chat", json={
+        "session_id": session_id,
+        "messages": [
+            {"role": "user", "text": "第一轮"},
+            {"role": "ai", "text": "first reply"},
+            {"role": "user", "text": "第二轮"},
+        ],
+    })
+    assert resp2.status_code == 200
+    events2 = _parse_sse(resp2.text)
+    session_id_events = [e for e in events2 if isinstance(e, dict) and "session_id" in e]
+    assert session_id_events == []  # no control event on reuse
+
+    list_resp = await app_client.get("/api/chat/sessions")
+    rows = list_resp.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == session_id
+    assert rows[0]["message_count"] == 4
+
+    msg_resp = await app_client.get(f"/api/chat/sessions/{session_id}/messages")
+    msgs = msg_resp.json()
+    assert len(msgs) == 4
+    assert [m["role"] for m in msgs] == ["user", "ai", "user", "ai"]
+    assert [m["text"] for m in msgs] == ["第一轮", "first reply", "第二轮", "second reply"]
+
+
+@pytest.mark.asyncio
+async def test_chat_get_messages_404_for_bogus_id(app_client):
+    resp = await app_client.get("/api/chat/sessions/deadbeefdeadbeef/messages")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_chat_delete_session_removes_messages(app_client, monkeypatch):
+    fake = _FakeLLM(response="bye")
+    _patch_engine(monkeypatch, fake)
+
+    resp = await app_client.post("/api/chat", json={
+        "messages": [{"role": "user", "text": "to be deleted"}],
+    })
+    events = _parse_sse(resp.text)
+    session_id = events[0]["session_id"]
+
+    del_resp = await app_client.delete(f"/api/chat/sessions/{session_id}")
+    assert del_resp.status_code == 204
+
+    # GET messages now 404
+    msg_resp = await app_client.get(f"/api/chat/sessions/{session_id}/messages")
+    assert msg_resp.status_code == 404
+
+    # DELETE again 404
+    del_again = await app_client.delete(f"/api/chat/sessions/{session_id}")
+    assert del_again.status_code == 404
+
+    # Session list empty
+    list_resp = await app_client.get("/api/chat/sessions")
+    assert list_resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_chat_error_path_persists_user_but_not_ai(app_client, monkeypatch):
+    _patch_engine(monkeypatch, _FailingLLM())
+
+    resp = await app_client.post("/api/chat", json={
+        "messages": [{"role": "user", "text": "会失败的问题"}],
+    })
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    session_id = events[0]["session_id"]
+    error_events = [e for e in events if isinstance(e, dict) and "error" in e]
+    assert len(error_events) == 1
+
+    msg_resp = await app_client.get(f"/api/chat/sessions/{session_id}/messages")
+    msgs = msg_resp.json()
+    assert len(msgs) == 1
+    assert msgs[0]["role"] == "user"
+    assert msgs[0]["text"] == "会失败的问题"
+
+
+@pytest.mark.asyncio
+async def test_chat_session_title_defaults_when_question_empty(app_client, monkeypatch):
+    fake = _FakeLLM(response="noop")
+    _patch_engine(monkeypatch, fake)
+
+    # No user message at all — title falls back to "New chat" and no
+    # user row is persisted (only the AI reply).
+    resp = await app_client.post("/api/chat", json={"messages": []})
+    events = _parse_sse(resp.text)
+    session_id = events[0]["session_id"]
+
+    list_resp = await app_client.get("/api/chat/sessions")
+    rows = list_resp.json()
+    assert len(rows) == 1
+    assert rows[0]["id"] == session_id
+    assert rows[0]["title"] == "New chat"
+
+
+@pytest.mark.asyncio
+async def test_chat_session_title_truncated_to_40_chars(app_client, monkeypatch):
+    fake = _FakeLLM(response="ok")
+    _patch_engine(monkeypatch, fake)
+
+    long_q = "x" * 100
+    resp = await app_client.post("/api/chat", json={
+        "messages": [{"role": "user", "text": long_q}],
+    })
+    events = _parse_sse(resp.text)
+    session_id = events[0]["session_id"]
+
+    list_resp = await app_client.get("/api/chat/sessions")
+    rows = list_resp.json()
+    title = [r["title"] for r in rows if r["id"] == session_id][0]
+    assert title == "x" * 40

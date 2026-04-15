@@ -53,6 +53,12 @@
             <div v-if="m.role === 'ai'" class="rendered" v-html="renderMd(m.text)"></div>
             <template v-else>{{ m.text }}</template>
           </div>
+          <a
+            v-if="m.error && idx === history.length - 1 && !busy"
+            class="retry-link"
+            href="#"
+            @click.prevent="retry(idx)"
+          >重试</a>
         </div>
 
         <!-- Typing indicator -->
@@ -76,12 +82,18 @@
           @input="autosize"
         />
         <el-button
+          v-if="!busy"
           type="primary"
           round
-          :loading="busy"
-          :disabled="!draft.trim() || busy"
+          :disabled="!draft.trim()"
           @click="sendFromBox"
         >发送</el-button>
+        <el-button
+          v-else
+          type="default"
+          round
+          @click="stop"
+        >停止</el-button>
       </div>
     </div>
   </div>
@@ -91,12 +103,18 @@
 import { ref, nextTick, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 
+const SESSION_STORAGE_KEY = 'pdl_chat_session_id'
+
 const history = ref([])    // [{role:'user'|'ai', text, error?}]
 const draft = ref('')
 const busy = ref(false)
 const streaming = ref(false)
 const logEl = ref(null)
 const boxEl = ref(null)
+
+const sessionId = ref(null)
+// Live AbortController for the in-flight fetch — mutated on ask()/stop().
+let controller = null
 
 const suggestions = [
   '最近一周干了啥？',
@@ -140,9 +158,41 @@ function sendFromBox() {
 
 function resetChat() {
   if (busy.value) return
+  localStorage.removeItem(SESSION_STORAGE_KEY)
+  sessionId.value = null
   history.value = []
   draft.value = ''
   autosize()
+}
+
+function stop() {
+  if (controller) {
+    try { controller.abort() } catch (_) { /* noop */ }
+  }
+}
+
+function retry(errorIdx) {
+  // Walk back from the error bubble to find the last user message. Drop
+  // the error bubble before resending so it doesn't leak into the next
+  // prompt's history.
+  let lastUserText = ''
+  for (let i = errorIdx - 1; i >= 0; i--) {
+    if (history.value[i].role === 'user') {
+      lastUserText = history.value[i].text
+      break
+    }
+  }
+  if (!lastUserText) return
+  // Drop the error bubble AND the most recent user message (ask() will
+  // re-push it so history/messages stay consistent with the request).
+  history.value.splice(errorIdx, 1)
+  for (let i = history.value.length - 1; i >= 0; i--) {
+    if (history.value[i].role === 'user' && history.value[i].text === lastUserText) {
+      history.value.splice(i, 1)
+      break
+    }
+  }
+  ask(lastUserText)
 }
 
 // Lightweight markdown renderer — matches DEFAULT_CHAT_PROMPT's output surface.
@@ -181,20 +231,29 @@ async function ask(text) {
   if (busy.value || !text.trim()) return
   busy.value = true
   streaming.value = false
+  controller = new AbortController()
 
   history.value.push({ role: 'user', text })
   scrollToBottom()
 
-  let aiEntry = null
+  // Index into history.value for the AI bubble being streamed. We write
+  // through the reactive proxy (history.value[aiIdx].text = ...) rather
+  // than holding a raw-object reference — the latter bypasses Vue's
+  // reactivity and leaves the bubble stuck on whatever rendered first.
+  let aiIdx = -1
   let assembled = ''
 
   try {
+    const body = {
+      messages: history.value.map(m => ({ role: m.role, text: m.text })),
+    }
+    if (sessionId.value) body.session_id = sessionId.value
+
     const resp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: history.value.map(m => ({ role: m.role, text: m.text })),
-      }),
+      body: JSON.stringify(body),
+      signal: controller.signal,
     })
     if (!resp.ok) throw new Error('HTTP ' + resp.status)
 
@@ -216,14 +275,19 @@ async function ask(text) {
         if (payload === '[DONE]') continue
         try {
           const evt = JSON.parse(payload)
-          if (evt.text !== undefined) {
-            if (!aiEntry) {
-              aiEntry = { role: 'ai', text: '' }
-              history.value.push(aiEntry)
+          if (evt.session_id !== undefined) {
+            // Control event — pin the fresh session id to localStorage
+            // so a reload picks up right where we left off.
+            sessionId.value = evt.session_id
+            try { localStorage.setItem(SESSION_STORAGE_KEY, evt.session_id) } catch (_) {}
+          } else if (evt.text !== undefined) {
+            if (aiIdx < 0) {
+              aiIdx = history.value.length
+              history.value.push({ role: 'ai', text: '' })
               streaming.value = true
             }
             assembled += evt.text
-            aiEntry.text = assembled
+            history.value[aiIdx].text = assembled
             scrollToBottom()
           } else if (evt.error) {
             history.value.push({ role: 'ai', text: '错误: ' + evt.error, error: true })
@@ -236,18 +300,47 @@ async function ask(text) {
       }
     }
   } catch (err) {
-    history.value.push({ role: 'ai', text: '请求失败: ' + err.message, error: true })
-    ElMessage.error('Chat 请求失败')
-    scrollToBottom()
+    if (err && err.name === 'AbortError') {
+      // User clicked 停止 — swallow silently. Any partial AI bubble
+      // already streamed stays put as an honest record of what arrived.
+    } else {
+      history.value.push({ role: 'ai', text: '请求失败: ' + err.message, error: true })
+      ElMessage.error('Chat 请求失败')
+      scrollToBottom()
+    }
   } finally {
     busy.value = false
     streaming.value = false
+    controller = null
     boxEl.value && boxEl.value.focus()
   }
 }
 
-onMounted(() => {
+async function restoreSession() {
+  let saved = null
+  try { saved = localStorage.getItem(SESSION_STORAGE_KEY) } catch (_) { return }
+  if (!saved) return
+  try {
+    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(saved)}/messages`)
+    if (resp.status === 404) {
+      localStorage.removeItem(SESSION_STORAGE_KEY)
+      return
+    }
+    if (!resp.ok) return  // transient error — leave id alone, user can retry by sending
+    const rows = await resp.json()
+    sessionId.value = saved
+    // Map {role, text} only; drop created_at so the history shape stays
+    // identical to freshly-sent messages.
+    history.value = rows.map(r => ({ role: r.role, text: r.text }))
+    scrollToBottom()
+  } catch (_) {
+    // Network error on boot — don't wipe the id, just skip restoration.
+  }
+}
+
+onMounted(async () => {
   autosize()
+  await restoreSession()
   boxEl.value && boxEl.value.focus()
 })
 </script>
@@ -371,6 +464,7 @@ onMounted(() => {
 /* Messages */
 .msg {
   display: flex;
+  flex-direction: column;
   max-width: 100%;
   animation: slideIn 0.22s ease-out;
 }
@@ -378,8 +472,8 @@ onMounted(() => {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.msg.user { align-self: flex-end; max-width: 82%; }
-.msg.ai   { align-self: flex-start; max-width: 92%; }
+.msg.user { align-self: flex-end; max-width: 82%; align-items: flex-end; }
+.msg.ai   { align-self: flex-start; max-width: 92%; align-items: flex-start; }
 
 .bubble {
   padding: 11px 16px;
@@ -404,6 +498,18 @@ onMounted(() => {
   border-color: var(--danger) !important;
   background: rgba(209, 69, 59, 0.06) !important;
   color: var(--danger) !important;
+}
+
+.retry-link {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+.retry-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
 .bubble .rendered { white-space: normal; }
