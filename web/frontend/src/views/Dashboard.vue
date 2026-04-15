@@ -400,8 +400,9 @@ onMounted(loadData)
 .stat-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+  padding: 18px 24px;   /* tighter than default card 24px — reduces card height ~15px */
 }
 
 .stat-label {

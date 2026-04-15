@@ -57,8 +57,14 @@
         />
       </g>
 
-      <!-- Bars: stacked per bucket. Gray idle at bottom, black active on top -->
-      <g v-else class="tl-bars" :style="{ transform: `translateX(${shiftPx}px)` }">
+      <!-- Horizontal grid lines (2 lines like mock) -->
+      <g v-if="!loading" class="tl-grid">
+        <line :x1="0" :x2="VB_W" :y1="VB_H - PAD_BOTTOM - chartHeight * 0.33" :y2="VB_H - PAD_BOTTOM - chartHeight * 0.33" stroke="var(--line)" stroke-width="0.5" />
+        <line :x1="0" :x2="VB_W" :y1="VB_H - PAD_BOTTOM - chartHeight * 0.66" :y2="VB_H - PAD_BOTTOM - chartHeight * 0.66" stroke="var(--line)" stroke-width="0.5" />
+      </g>
+
+      <!-- Bars: one per bucket. idle > 50% of total → gray, else black -->
+      <g v-if="!loading" class="tl-bars" :style="{ transform: `translateX(${shiftPx}px)` }">
         <g
           v-for="(b, idx) in buckets"
           :key="b.start"
@@ -67,34 +73,21 @@
           :style="idx === 0 && shifting ? { opacity: 0 } : {}"
           @mouseenter="(e) => showTooltip(e, b, idx)"
         >
-          <!-- Idle segment (gray, drawn first = behind) -->
           <rect
-            v-if="(b.idle_mins || 0) > 0"
-            class="tl-bar tl-bar-idle"
+            v-if="totalMins(b) > 0"
+            :class="['tl-bar', isIdleDominant(b) ? 'tl-bar-idle' : 'tl-bar-active', { 'tl-bar-pulse': idx === buckets.length - 1 }]"
             :x="BAR_GAP"
-            :y="VB_H - PAD_BOTTOM - idlePx(b)"
+            :y="VB_H - PAD_BOTTOM - totalPx(b)"
             :width="barW"
-            :height="idlePx(b)"
+            :height="totalPx(b)"
             rx="1.5"
-            fill="var(--ink)"
-            fill-opacity="0.22"
-          />
-
-          <!-- Active segment (black, stacked on top of idle) -->
-          <rect
-            v-if="(b.active_mins || 0) > 0"
-            :class="['tl-bar', 'tl-bar-active', { 'tl-bar-pulse': idx === buckets.length - 1 }]"
-            :x="BAR_GAP"
-            :y="VB_H - PAD_BOTTOM - idlePx(b) - activePx(b)"
-            :width="barW"
-            :height="activePx(b)"
-            rx="1.5"
-            fill="var(--ink)"
+            :fill="'var(--ink)'"
+            :fill-opacity="isIdleDominant(b) ? 0.22 : 1"
           />
 
           <!-- Empty → invisible hit area -->
           <rect
-            v-if="(b.active_mins || 0) === 0 && (b.idle_mins || 0) === 0"
+            v-else
             :x="BAR_GAP"
             :y="VB_H - PAD_BOTTOM - 4"
             :width="barW"
@@ -238,22 +231,13 @@ const maxTotal = computed(() => {
   return m || 1
 })
 
-// Pixel heights for stacked bars (direct px, no scaleY transform)
-function activePx(b) {
-  return ((b.active_mins || 0) / maxTotal.value) * chartHeight * 0.92
-}
+function totalMins(b) { return (b.active_mins || 0) + (b.idle_mins || 0) }
+function isIdleDominant(b) { return (b.idle_mins || 0) > totalMins(b) * 0.5 }
+function totalPx(b) { return (totalMins(b) / maxTotal.value) * chartHeight * 0.92 }
 
-function idlePx(b) {
-  return ((b.idle_mins || 0) / maxTotal.value) * chartHeight * 0.92
-}
-
-// Keep these for tooltip barMode check
+// Keep for tooltip
 function activeScale(b) {
   return maxActive.value > 0 ? (b.active_mins / maxActive.value) * 0.9 : 0
-}
-
-function idleScale(b) {
-  return Math.min(1, (b.idle_mins || 0) / props.bucketMinutes) * 0.5
 }
 
 // Cursor position inside the window
