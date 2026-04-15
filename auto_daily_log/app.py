@@ -42,11 +42,55 @@ class Application:
             # Pure-server mode: no built-in collector
             self.monitor = None
             return
-        # Built-in collector construction happens in phase 5 (CollectorRuntime
-        # with LocalSQLiteBackend). Temporarily None so server still boots
-        # during the refactor — tests that cover monitor.enabled=True are
-        # rewritten in phase 6.
-        self.monitor = None
+
+        # Built-in collector: CollectorRuntime driving a LocalSQLiteBackend.
+        # machine_id is pinned to "local" and HTTP registration is skipped
+        # because the in-process collector writes straight to our DB.
+        from auto_daily_log.models.backends import LocalSQLiteBackend
+        from auto_daily_log_collector.config import CollectorConfig
+        from auto_daily_log_collector.enricher import ActivityEnricher
+        from auto_daily_log_collector.platforms import create_adapter
+        from auto_daily_log_collector.runner import CollectorRuntime
+
+        m = self.config.monitor
+        data_dir = self.config.system.resolved_data_dir
+        screenshot_dir = data_dir / "screenshots"
+
+        collector_config = CollectorConfig(
+            server_url="http://builtin.local",  # unused when skip_http_register
+            name="Built-in (this machine)",
+            interval_sec=m.interval_sec,
+            ocr_enabled=m.ocr_enabled,
+            ocr_engine=m.ocr_engine,
+            screenshot_retention_days=m.screenshot_retention_days,
+            idle_threshold_sec=m.idle_threshold_sec,
+            phash_enabled=m.phash_enabled,
+            phash_threshold=m.phash_threshold,
+            blocked_apps=list(m.privacy.blocked_apps),
+            blocked_urls=list(m.privacy.blocked_urls),
+            hostile_apps_applescript=list(m.hostile_apps_applescript),
+            hostile_apps_screenshot=list(m.hostile_apps_screenshot),
+            data_dir=str(data_dir),
+        )
+
+        adapter = create_adapter()
+        enricher = ActivityEnricher(
+            screenshot_dir=screenshot_dir,
+            hostile_apps_applescript=m.hostile_apps_applescript,
+            hostile_apps_screenshot=m.hostile_apps_screenshot,
+            phash_enabled=m.phash_enabled,
+            phash_threshold=m.phash_threshold,
+        )
+        backend = LocalSQLiteBackend(self.db)
+
+        self.monitor = CollectorRuntime(
+            config=collector_config,
+            backend=backend,
+            adapter=adapter,
+            enricher=enricher,
+            machine_id="local",
+            skip_http_register=True,
+        )
 
     async def _register_builtin_collector(self) -> None:
         """Auto-register the built-in monitor as collector machine_id='local'.
@@ -183,7 +227,8 @@ class Application:
         watchdog = None
         watchdog_task = None
         if self.monitor is not None:
-            monitor_task = asyncio.create_task(self.monitor.start())
+            # CollectorRuntime.run() replaces the old MonitorService.start().
+            monitor_task = asyncio.create_task(self.monitor.run())
             from auto_daily_log_collector.monitor_internals.watchdog import WecomWatchdog
             dump_dir = self.config.system.resolved_data_dir / "watchdog"
             watchdog = WecomWatchdog(self.monitor.trace, dump_dir)

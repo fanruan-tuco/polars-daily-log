@@ -61,7 +61,42 @@ class LocalSQLiteBackend(StorageBackend):
             "UPDATE collectors SET last_seen = datetime('now') WHERE machine_id = ?",
             (machine_id,),
         )
-        return None
+
+        # Mirror the old MonitorService runtime-config behaviour: surface a
+        # settings-table override so the built-in CollectorRuntime picks up
+        # UI changes (ocr_enabled, interval_sec…) without a restart. Only
+        # the 'local' built-in reads this; standalone collectors use the
+        # HTTP heartbeat which goes through a different code path.
+        if machine_id != "local":
+            return None
+
+        rows = await self._db.fetch_all(
+            "SELECT key, value FROM settings WHERE key IN "
+            "('monitor_ocr_enabled', 'monitor_ocr_engine', 'monitor_interval_sec')"
+        )
+        s = {r["key"]: r["value"] for r in rows}
+        if not s:
+            return None
+
+        def _bool(val: Optional[str]) -> Optional[bool]:
+            if val is None:
+                return None
+            return str(val).lower() in ("true", "1", "yes", "on")
+
+        override: dict = {}
+        if "monitor_ocr_enabled" in s:
+            override["ocr_enabled"] = _bool(s["monitor_ocr_enabled"])
+        if "monitor_ocr_engine" in s and s["monitor_ocr_engine"]:
+            override["ocr_engine"] = s["monitor_ocr_engine"]
+        if "monitor_interval_sec" in s and s["monitor_interval_sec"]:
+            try:
+                override["interval_sec"] = int(s["monitor_interval_sec"])
+            except (TypeError, ValueError):
+                pass
+
+        if not override:
+            return None
+        return {"config_override": override, "is_paused": False}
 
     async def extend_duration(self, machine_id: str, row_id: int, extra_sec: int) -> None:
         await self._db.execute(

@@ -25,6 +25,7 @@ from .client import RegistrationClient
 from .config import CollectorConfig
 from .credentials import load_credentials, save_credentials
 from .enricher import ActivityEnricher
+from .monitor_internals.watchdog import MonitorTrace
 from .platforms import PlatformAdapter, create_adapter
 
 
@@ -35,7 +36,8 @@ class CollectorRuntime:
 
     # Allow-list of config keys honored from server override
     HONORED_OVERRIDE_KEYS = {
-        "interval_sec", "ocr_enabled", "blocked_apps", "blocked_urls",
+        "interval_sec", "ocr_enabled", "ocr_engine",
+        "blocked_apps", "blocked_urls",
     }
 
     def __init__(
@@ -79,6 +81,7 @@ class CollectorRuntime:
         self._enricher: ActivityEnricher = enricher or self._build_default_enricher()
         self._machine_id: Optional[str] = machine_id
         self._skip_http_register: bool = skip_http_register
+        self._trace: MonitorTrace = MonitorTrace()
         self._running = False
         self._paused = False
 
@@ -221,18 +224,23 @@ class CollectorRuntime:
         self._last_was_idle = False
         self._last_idle_row_id = None
 
+        self._trace.log("get_frontmost_app")
         app = self._adapter.get_frontmost_app()
+        self._trace.log("got_frontmost", app=app)
         if not app:
             return None
 
         is_hostile = self._enricher.is_hostile_applescript(app)
 
         if is_hostile:
+            self._trace.log("skip_probe_hostile", app=app)
             title = None
             url = None
             wecom_group = None
         else:
+            self._trace.log("get_window_title", app=app)
             title = self._adapter.get_window_title(app)
+            self._trace.log("got_window_title", app=app, title=title)
             tab_title, url = self._adapter.get_browser_tab(app)
             title = tab_title or title
             wecom_group = self._adapter.get_wecom_chat_name(app)
@@ -386,3 +394,8 @@ class CollectorRuntime:
     @property
     def backend(self) -> Optional[StorageBackend]:
         return self._backend
+
+    @property
+    def trace(self) -> MonitorTrace:
+        """Ring-buffer trace used by WecomWatchdog for post-mortem dumps."""
+        return self._trace
