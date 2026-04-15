@@ -45,7 +45,7 @@ async def test_full_daily_workflow(client):
     settings = {
         "jira_server_url": "https://jira.test.com",
         "jira_pat": "test-pat-token",
-        "llm_engine": "kimi",
+        "llm_engine": "openai_compat",
         "llm_api_key": "test-key",
         "monitor_interval_sec": "30",
         "monitor_ocr_enabled": "true",
@@ -63,7 +63,7 @@ async def test_full_daily_workflow(client):
     assert resp.status_code == 200
     saved = {s["key"]: s["value"] for s in resp.json()}
     assert saved["jira_server_url"] == "https://jira.test.com"
-    assert saved["llm_engine"] == "kimi"
+    assert saved["llm_engine"] == "openai_compat"
     print("  [OK] Step 1: Settings configured")
 
     # ── Step 2: Add Jira issues ──
@@ -127,78 +127,83 @@ async def test_full_daily_workflow(client):
     # ── Step 5: Generate worklog drafts via summarizer ──
     from auto_daily_log.summarizer.summarizer import WorklogSummarizer
 
+    # Two-step pipeline: step 1 raw text, step 2 per-issue JSON array.
     mock_engine = AsyncMock()
-    mock_engine.generate.return_value = json.dumps([
-        {
-            "issue_key": "PROJ-101",
-            "time_spent_hours": 3.0,
-            "summary": "重构SQL解析器，修复了JOIN限定名解析错误，新增cross join WHERE子句支持，完成代码review。",
-        },
-        {
-            "issue_key": "PROJ-102",
-            "time_spent_hours": 2.5,
-            "summary": "修复登录模块session超时不刷新token的bug，排查了Stack Overflow上的相关方案并实现修复。",
-        },
-    ])
+    mock_engine.generate.side_effect = [
+        "今天主要重构 SQL 解析器 + 修复登录 session 超时问题。约 5.5 小时工作。",
+        json.dumps([
+            {
+                "issue_key": "PROJ-101",
+                "time_spent_hours": 3.0,
+                "summary": "重构SQL解析器，修复了JOIN限定名解析错误，新增cross join WHERE子句支持，完成代码review。",
+            },
+            {
+                "issue_key": "PROJ-102",
+                "time_spent_hours": 2.5,
+                "summary": "修复登录模块session超时不刷新token的bug，排查了Stack Overflow上的相关方案并实现修复。",
+            },
+        ]),
+    ]
 
     summarizer = WorklogSummarizer(db, mock_engine)
     drafts = await summarizer.generate_drafts(today)
-    assert len(drafts) == 2
-    assert drafts[0]["issue_key"] == "PROJ-101"
-    assert drafts[1]["issue_key"] == "PROJ-102"
+    assert len(drafts) == 1
+    assert drafts[0]["issue_key"] == "DAILY"
+    issue_entries = json.loads(drafts[0]["summary"])
+    assert [e["issue_key"] for e in issue_entries] == ["PROJ-101", "PROJ-102"]
 
     # Verify via API
     resp = await http.get(f"/api/worklogs?date={today}")
     assert resp.status_code == 200
     api_drafts = resp.json()
-    assert len(api_drafts) == 2
-    assert all(d["status"] == "pending_review" for d in api_drafts)
-    print("  [OK] Step 5: 2 worklog drafts generated (pending_review)")
+    assert len(api_drafts) == 1
+    assert api_drafts[0]["status"] == "pending_review"
+    print("  [OK] Step 5: 1 DAILY worklog draft generated (pending_review)")
 
-    # ── Step 6: Edit a draft ──
-    draft_101 = next(d for d in api_drafts if d["issue_key"] == "PROJ-101")
-    resp = await http.patch(f"/api/worklogs/{draft_101['id']}", json={
-        "summary": "重构SQL解析器：修复JOIN限定名解析错误（AstToPlanConverter.java），新增cross join WHERE子句支持。通过code review。",
-        "time_spent_sec": 12600,  # 3.5h
+    # ── Step 6: Edit the DAILY draft summary ──
+    daily_draft = api_drafts[0]
+    new_summary = json.dumps([
+        {"issue_key": "PROJ-101", "time_spent_hours": 3.5,
+         "summary": "重构SQL解析器：修复JOIN限定名解析错误（AstToPlanConverter.java），新增cross join WHERE子句支持。通过code review。"},
+        {"issue_key": "PROJ-102", "time_spent_hours": 2.5,
+         "summary": "修复登录模块session超时不刷新token的bug。"},
+    ], ensure_ascii=False)
+    resp = await http.patch(f"/api/worklogs/{daily_draft['id']}", json={
+        "summary": new_summary,
+        "time_spent_sec": 21600,  # 3.5 + 2.5 + buffer
     })
     assert resp.status_code == 200
 
-    # Verify edit
     resp = await http.get(f"/api/worklogs?date={today}")
-    edited = next(d for d in resp.json() if d["issue_key"] == "PROJ-101")
+    edited = resp.json()[0]
     assert edited["user_edited"] == 1
-    assert edited["time_spent_sec"] == 12600
+    assert edited["time_spent_sec"] == 21600
     assert "code review" in edited["summary"]
-    print("  [OK] Step 6: Draft PROJ-101 edited (3.5h, updated summary)")
+    print("  [OK] Step 6: DAILY draft edited (21600s, updated summary)")
 
-    # ── Step 7: Approve drafts ──
-    # Approve PROJ-101 manually
-    resp = await http.post(f"/api/worklogs/{draft_101['id']}/approve")
-    assert resp.status_code == 200
-
-    # Approve all remaining (PROJ-102)
-    resp = await http.post(f"/api/worklogs/approve-all?date={today}")
+    # ── Step 7: Approve the draft ──
+    resp = await http.post(f"/api/worklogs/{daily_draft['id']}/approve")
     assert resp.status_code == 200
 
     resp = await http.get(f"/api/worklogs?date={today}")
     assert all(d["status"] == "approved" for d in resp.json())
-    print("  [OK] Step 7: All drafts approved")
+    print("  [OK] Step 7: Draft approved")
 
-    # ── Step 8: Test auto-approve flow (on a new draft) ──
+    # ── Step 8: Auto-approve flow (seed a new pending draft) ──
     from auto_daily_log.scheduler.jobs import DailyWorkflow
     from auto_daily_log.config import AutoApproveConfig
 
-    # Seed a new pending draft
+    seed_summary = json.dumps(
+        [{"issue_key": "PROJ-101", "time_spent_hours": 0.5, "summary": "额外的调试工作"}],
+        ensure_ascii=False,
+    )
     resp = await http.post("/api/worklogs/seed", json={
-        "date": today, "issue_key": "PROJ-101",
-        "time_spent_sec": 1800, "summary": "额外的调试工作",
+        "date": today, "issue_key": "DAILY",
+        "time_spent_sec": 1800, "summary": seed_summary, "tag": "daily",
     })
     new_draft_id = resp.json()["id"]
 
-    auto_engine = AsyncMock()
-    auto_engine.generate.return_value = json.dumps({"approved": True})
-    config = AutoApproveConfig(enabled=True, trigger_time="21:30")
-    workflow = DailyWorkflow(db, auto_engine, config)
+    workflow = DailyWorkflow(db, AsyncMock(), AutoApproveConfig(enabled=True, trigger_time="21:30"))
     await workflow.auto_approve_pending(today)
 
     resp = await http.get(f"/api/worklogs?date={today}")
@@ -207,7 +212,7 @@ async def test_full_daily_workflow(client):
     print("  [OK] Step 8: Auto-approve workflow works")
 
     # ── Step 9: Verify audit trail ──
-    resp = await http.get(f"/api/worklogs/{draft_101['id']}/audit")
+    resp = await http.get(f"/api/worklogs/{daily_draft['id']}/audit")
     assert resp.status_code == 200
     audit = resp.json()
     actions = [a["action"] for a in audit]
@@ -234,9 +239,13 @@ async def test_full_daily_workflow(client):
     print("  [OK] Step 11: Issue cleanup works")
 
     # ── Step 12: Reject flow ──
+    reject_summary = json.dumps(
+        [{"issue_key": "PROJ-102", "time_spent_hours": 0.25, "summary": "低质量日志"}],
+        ensure_ascii=False,
+    )
     resp = await http.post("/api/worklogs/seed", json={
-        "date": today, "issue_key": "PROJ-102",
-        "time_spent_sec": 900, "summary": "低质量日志",
+        "date": today, "issue_key": "DAILY",
+        "time_spent_sec": 900, "summary": reject_summary, "tag": "daily",
     })
     reject_id = resp.json()["id"]
     resp = await http.post(f"/api/worklogs/{reject_id}/reject")

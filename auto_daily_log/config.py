@@ -60,18 +60,15 @@ class LLMProviderConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    engine: str = "kimi"
-    kimi: LLMProviderConfig = LLMProviderConfig(
+    engine: str = "openai_compat"
+    openai_compat: LLMProviderConfig = LLMProviderConfig(
         model="moonshot-v1-8k", base_url="https://api.moonshot.cn/v1"
     )
-    openai: LLMProviderConfig = LLMProviderConfig(
-        model="gpt-4o", base_url="https://api.openai.com/v1"
+    anthropic: LLMProviderConfig = LLMProviderConfig(
+        model="claude-sonnet-4-20250514", base_url="https://api.anthropic.com"
     )
     ollama: LLMProviderConfig = LLMProviderConfig(
         model="llama3", base_url="http://localhost:11434"
-    )
-    claude: LLMProviderConfig = LLMProviderConfig(
-        model="claude-sonnet-4-20250514"
     )
 
 

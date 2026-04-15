@@ -429,7 +429,7 @@ const jiraLoginResult = ref(null)
 const settings = ref({
   monitor_interval_sec: 30, monitor_ocr_enabled: true, monitor_ocr_engine: 'auto',
   monitor_screenshot_retention_days: 7, jira_server_url: '', jira_pat: '', jira_auth_mode: 'cookie', jira_cookie: '',
-  llm_engine: 'kimi', llm_api_key: '', llm_model: '', llm_base_url: '',
+  llm_engine: 'openai_compat', llm_api_key: '', llm_model: '', llm_base_url: '',
   summarize_prompt: '', auto_approve_prompt: '', period_summary_prompt: '',
   scheduler_enabled: true, scheduler_trigger_time: '18:00',
   auto_approve_enabled: true, auto_approve_trigger_time: '21:30',
@@ -460,10 +460,6 @@ const PROTOCOL_DEFAULTS = {
   openai_compat: { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
   anthropic:     { url: 'https://api.anthropic.com',  model: 'claude-sonnet-4-20250514' },
   ollama:        { url: 'http://localhost:11434',     model: 'llama3' },
-  // Legacy values still seen from old DB
-  kimi:          { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
-  openai:        { url: 'https://api.openai.com/v1',  model: 'gpt-4o' },
-  claude:        { url: 'https://api.anthropic.com',  model: 'claude-sonnet-4-20250514' },
 }
 const basePlaceholder = computed(() => (PROTOCOL_DEFAULTS[settings.value.llm_engine] || {}).url || '')
 const modelPlaceholder = computed(() => (PROTOCOL_DEFAULTS[settings.value.llm_engine] || {}).model || '')

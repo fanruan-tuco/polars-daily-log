@@ -112,9 +112,7 @@
             <el-button round size="small" @click="editingFullId = null">取消</el-button>
           </div>
         </div>
-        <div v-else class="issue-body">
-          <p style="white-space: pre-wrap">{{ draft.full_summary }}</p>
-        </div>
+        <div v-else class="issue-body markdown-body" v-html="renderMarkdown(draft.full_summary)"></div>
       </div>
       <div v-else-if="isDailyTag(draft) && !draft.full_summary && parseIssues(draft.summary)" class="issue-section">
         <div class="issue-header">
@@ -226,7 +224,15 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { marked } from 'marked'
 import api from '../api'
+
+marked.setOptions({ breaks: true, gfm: true })
+
+function renderMarkdown(text) {
+  if (!text) return ''
+  return marked.parse(text)
+}
 
 const selectedDate = ref(new Date().toISOString().split('T')[0])
 const drafts = ref([])
@@ -311,10 +317,10 @@ async function generate(type, startDate = null, endDate = null) {
 
     generating.value = true
     const steps = {
-      daily: ['正在采集 Git 提交记录...', '正在分析活动数据...', '正在调用 AI 生成日志...', '正在保存草稿...'],
-      weekly: ['正在读取本周每日日志...', '正在调用 AI 生成周报...', '正在保存...'],
-      monthly: ['正在读取本月每日日志...', '正在调用 AI 生成月报...', '正在保存...'],
-      custom: ['正在读取指定周期日志...', '正在调用 AI 生成总结...', '正在保存...'],
+      daily: ['正在采集 Git 提交记录...', '正在分析活动数据...', '正在调用 AI 生成日志...', 'AI 正在总结...', 'AI 正在炼化...'],
+      weekly: ['正在读取本周每日日志...', '正在调用 AI 生成周报...', 'AI 正在总结...', 'AI 正在炼化...'],
+      monthly: ['正在读取本月每日日志...', '正在调用 AI 生成月报...', 'AI 正在总结...', 'AI 正在炼化...'],
+      custom: ['正在读取指定周期日志...', '正在调用 AI 生成总结...', 'AI 正在总结...', 'AI 正在炼化...'],
     }
     const typeSteps = steps[type] || steps.daily
     let stepIndex = 0
@@ -529,6 +535,26 @@ onMounted(loadDrafts)
   line-height: 1.7;
   color: var(--text-primary, #1d1d1f);
 }
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3) {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.markdown-body :deep(h2) { font-size: 15px; }
+.markdown-body :deep(h3) { font-size: 14px; color: var(--text-secondary, #6e6e73); }
+.markdown-body :deep(p) { margin: 6px 0; }
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) { margin: 6px 0; padding-left: 22px; }
+.markdown-body :deep(li) { margin: 2px 0; }
+.markdown-body :deep(code) {
+  background: rgba(0,0,0,0.05);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+.markdown-body :deep(strong) { font-weight: 600; }
 .issue-edit {
   padding: 8px 20px 12px;
 }

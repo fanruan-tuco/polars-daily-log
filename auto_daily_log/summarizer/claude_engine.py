@@ -3,7 +3,7 @@ from ..config import LLMProviderConfig
 from .engine import LLMEngine
 
 class ClaudeEngine(LLMEngine):
-    name = "claude"
+    name = "anthropic"
     def __init__(self, config: LLMProviderConfig):
         self._config = config
     async def generate(self, prompt: str) -> str:
