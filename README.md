@@ -1,45 +1,66 @@
 # Polars Daily Log
 
-你自己的工作活动聚合器。自动抓每台机器的前台活动 + Git commits，
-LLM 总结成日志，可以一键推给 Jira 当工时。
+**English / [中文](README_zh.md)**
 
-**一人一套数据**，数据只在你自己的机器上，不会上传到公网。
+Your personal work-activity aggregator. It silently tracks foreground activity
+and Git commits on every machine you work on, asks an LLM to summarize the day,
+and can push the result to Jira as worklogs with one click.
 
-## 你有几台机器？
+**One install per person** — your data lives only on your own machines,
+nothing leaves your network.
 
-| 你的情况 | 装法 |
-|---------|------|
-| **只在一台电脑上用**（最常见）| 一台上装 "both"——server + collector 一体 |
-| **多台电脑想汇总**（MacBook + 工作台式 + Linux 等） | 最常开机的那台装 "both" 当 hub，其他机器只装 "collector" 推过来 |
-| **我想改代码** | [跳到 §开发者](#开发者) |
+## How many machines do you use?
+
+| Your situation | How to install |
+|---|---|
+| **Just one computer** (most common) | Install `both` on that one machine — server + collector in one |
+| **Multiple machines to aggregate** (MacBook + work desktop + Linux box etc.) | Install `both` on the machine that's always on as the hub; install `collector` only on the others and point them at the hub |
+| **I want to hack on the code** | [Jump to §Developers](#developers) |
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 前置
+### Prerequisites
 
 | | macOS | Linux | Windows |
 |---|-------|-------|---------|
-| Python 3.9+ | 自带 | 自带 | `winget install Python.Python.3.12` |
+| Python 3.9+ | built-in | built-in | `winget install Python.Python.3.12` |
 | git | `xcode-select --install` | `apt install git` | `winget install Git.Git` |
 
-### 装
+### Install
 
-1. **下载 tarball**（从项目主页 / 朋友发你的链接 / 任何地方拿到）
+#### One-liner (recommended, macOS / Linux)
 
-   ```
-   polars-daily-log-0.1.0.tar.gz    约 550KB
-   ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh | bash
+```
 
-2. **解压**
+This pulls the latest release, extracts it to `~/.polars-daily-log`, and runs `install.sh` interactively.
+
+Non-interactive variant (e.g. installing a collector on a second machine):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh | \
+  PDL_ROLE=collector \
+  PDL_SERVER_URL=http://your-hub-ip:8888 \
+  PDL_COLLECTOR_NAME=my-laptop \
+  bash
+```
+
+Optional env vars: `PDL_VERSION` (pin a version, default `latest`), `PDL_INSTALL_DIR` (default `~/.polars-daily-log`).
+
+#### Manual install (Windows, or offline handoff)
+
+1. **Download the tarball** from the [Releases page](https://github.com/Conner2077/polars-daily-log/releases)
+2. **Extract**
 
    ```bash
-   tar xzf polars-daily-log-0.1.0.tar.gz
-   cd polars-daily-log-0.1.0
+   tar xzf polars-daily-log-0.2.0.tar.gz
+   cd polars-daily-log-0.2.0
    ```
 
-3. **跑 installer**
+3. **Run the installer**
 
    ```bash
    # macOS / Linux
@@ -49,63 +70,63 @@ LLM 总结成日志，可以一键推给 Jira 当工时。
    powershell -ExecutionPolicy Bypass -File install.ps1
    ```
 
-4. **跟着问答走**
+4. **Follow the prompts**
 
-   **场景 A — 只在这一台机器用**：
+   **Scenario A — only using this one machine**:
 
    ```
    0. What are you installing?
      1) server      — ...
      2) collector   — ...
      3) both        — ...
-     Choose: 3          ← 选 both
+     Choose: 3          ← pick both
    ```
 
-   **场景 B — 这是第 N 台机器，只想推数据到你的 hub**：
+   **Scenario B — this is an additional machine, just push data to your hub**:
 
    ```
-     Choose: 2          ← 选 collector
-     Server URL: http://你的hub机器的IP:8888
-     Collector name [此机hostname]: ←回车用默认
+     Choose: 2          ← pick collector
+     Server URL: http://your-hub-ip:8888
+     Collector name [this-host]: ← press Enter for default
    ```
 
-5. **启动**
+5. **Start it**
 
    ```bash
-   ./pdl server start            # 场景 A 或 hub
-   ./pdl collector start         # 场景 B
+   ./pdl server start            # scenario A or the hub
+   ./pdl collector start         # scenario B
    ```
 
-6. **打开 `http://127.0.0.1:8888`**（或 hub 机器 IP）看自己的日志。首次进去 Settings 配一下：
-   - **LLM**：选 Kimi / OpenAI / Claude，填 API Key（或留空用内置 Kimi）
-   - **Jira**（可选）：如果想把日志同步为 Jira 工时，扫码登录 Jira SSO
+6. **Open `http://127.0.0.1:8888`** (or the hub machine's IP). In Settings, configure:
+   - **LLM**: choose Kimi / OpenAI / Claude, paste your API key (or leave blank to use the built-in Kimi default)
+   - **Jira** (optional): if you want daily logs to sync as Jira worklogs, scan the QR to sign into Jira SSO
 
 ---
 
-## 日常操作
+## Daily use
 
-### 启停
+### Start / stop
 
-| 场景 | 命令 |
-|------|------|
-| 启动 | `./pdl start`（server + collector 一起）|
-| 只启 server | `./pdl server start` |
-| 只启 collector | `./pdl collector start` |
-| 看状态 | `./pdl status` |
-| 停 | `./pdl stop` |
-| 重启 | `./pdl restart` |
+| What | Command |
+|---|---|
+| Start everything | `./pdl start` (server + collector together) |
+| Start server only | `./pdl server start` |
+| Start collector only | `./pdl collector start` |
+| Status | `./pdl status` |
+| Stop | `./pdl stop` |
+| Restart | `./pdl restart` |
 
-### 日志 / 调试
+### Logs / debug
 
 ```bash
-./pdl server logs 100         # server 后端 log
-./pdl server logs -f          # 实时跟
+./pdl server logs 100         # server backend log
+./pdl server logs -f          # follow live
 ./pdl collector logs 50       # collector log
 ```
 
-### Windows 上的等价操作
+### Windows equivalents
 
-目前 Windows 靠 Scheduled Task 自启（安装时会问你要不要登录时自动起）：
+On Windows, autostart goes through Scheduled Tasks (the installer asks whether to enable login autostart):
 
 ```powershell
 Start-ScheduledTask -TaskName AutoDailyLogServer
@@ -113,52 +134,55 @@ Stop-ScheduledTask -TaskName AutoDailyLogServer
 Get-ScheduledTaskInfo -TaskName AutoDailyLogCollector
 ```
 
-### 数据 / 日志位置
+### Where your data lives
 
-| 东西 | 路径 |
-|------|------|
-| 数据库（活动、日志、配置）| `~/.auto_daily_log/data.db` |
-| 截图 | `~/.auto_daily_log/screenshots/YYYY-MM-DD/` |
+| Thing | Path |
+|---|---|
+| Database (activities, logs, config) | `~/.auto_daily_log/data.db` |
+| Screenshots | `~/.auto_daily_log/screenshots/YYYY-MM-DD/` |
 | Server log | `~/.auto_daily_log/logs/server.log` |
-| Collector log | `~/.auto_daily_log_collector/logs/collector.log`（独立 collector 时）|
-| 配置文件 | `<解压目录>/config.yaml`、`<解压目录>/collector.yaml` |
+| Collector log | `~/.auto_daily_log_collector/logs/collector.log` (standalone collector) |
+| Config files | `<install-dir>/config.yaml`, `<install-dir>/collector.yaml` |
 
-升级覆盖 tarball 时，这些 `~/` 下的**都不会动**，升级不丢数据。
+When you overwrite the tarball to upgrade, nothing under `~/` is touched — upgrades don't lose data.
 
-### 反馈 bug
+### Report a bug
 
-Web UI 右上角 💡 按钮 — 写几句就行，后台自动附当前页面 + UA 发给开发者。
+Click the 💡 button in the top-right of the Web UI. Write a few words; it automatically attaches the current page + UA and sends it to the developer.
 
 ---
 
-## 升级
+## Upgrade
 
+**Installed via the one-liner**: rerun the same curl command. It upgrades in place (runs `./pdl stop` first; your data under `~/` is untouched).
+
+**Installed manually**:
 ```bash
-# 停服务
+# Stop services
 ./pdl stop
 
-# 解压新 tarball 覆盖当前目录（venv 保留，数据在 ~/ 下也在）
+# Overwrite the install dir with the new tarball (venv is kept, data under ~/ is kept)
 tar xzf polars-daily-log-0.2.0.tar.gz --strip-components=1
 
-# 从新 wheel 重装 Python 部分，前端 dist 也在 wheel 里
+# Reinstall Python from the new wheel; the frontend dist ships inside the wheel
 ./pdl build --restart
 ```
 
-如果 release notes 说有 config 迁移，会在 `CHANGELOG.md` 顶部明确写出来。
+If a release requires config migration, it'll be called out at the top of `CHANGELOG.md`.
 
 ---
 
-## 卸载
+## Uninstall
 
 ```bash
 ./pdl stop
 cd ..
-rm -rf polars-daily-log-0.1.0/        # 代码 + venv + 配置
-rm -rf ~/.auto_daily_log              # 数据 + 日志（不想删日志就跳过）
-rm -rf ~/.auto_daily_log_collector    # 独立 collector 的凭据 + 离线队列
+rm -rf ~/.polars-daily-log            # or your manual install dir
+rm -rf ~/.auto_daily_log              # data + logs (skip if you want to keep them)
+rm -rf ~/.auto_daily_log_collector    # standalone collector credentials + offline queue
 ```
 
-Windows 额外：
+Windows extras:
 ```powershell
 Unregister-ScheduledTask -TaskName AutoDailyLogServer -Confirm:$false
 Unregister-ScheduledTask -TaskName AutoDailyLogCollector -Confirm:$false
@@ -166,58 +190,58 @@ Unregister-ScheduledTask -TaskName AutoDailyLogCollector -Confirm:$false
 
 ---
 
-## 故障排查
+## Troubleshooting
 
-| 症状 | 怎么看 |
-|------|--------|
-| `No module named aiosqlite` 启动就崩 | venv 没激活 / 跳过了 `install.sh`。重跑 `bash install.sh` |
-| 当日总结只有 "Activity summary: ..." 行 | LLM 调用失败 → Web UI Settings 检查 engine / URL / API Key 对得上 |
-| 提交 Jira 返 500 "内部服务器错误" | comment 含 emoji。新版已自动去除，升级一下 |
-| 企业微信 2-4 分钟自退 | 确认 `config.yaml` 里 `monitor.hostile_apps_applescript` 包含 `企业微信/wechat/wecom` |
-| 前端白屏 | `./pdl server logs 50` 看后端；硬刷浏览器 Cmd+Shift+R |
-| Windows collector 不动 | 看 `%USERPROFILE%\.auto_daily_log_collector\logs\collector.log`；检查 Scheduled Task 状态 |
+| Symptom | What to check |
+|---|---|
+| `No module named aiosqlite` on startup | venv not activated / `install.sh` was skipped. Rerun `bash install.sh` |
+| Daily summary contains only `Activity summary: ...` lines | LLM call failed → in Web UI Settings, verify engine / URL / API key match |
+| Submitting to Jira returns 500 "Internal Server Error" | The comment contained an emoji. The latest version scrubs these automatically — upgrade |
+| WeCom auto-exits after 2–4 minutes | Make sure `monitor.hostile_apps_applescript` in `config.yaml` includes `wechat/wecom/企业微信` |
+| Frontend blank page | `./pdl server logs 50` to check the backend; hard-reload the browser (Cmd/Ctrl+Shift+R) |
+| Windows collector is idle | Check `%USERPROFILE%\.auto_daily_log_collector\logs\collector.log` and the Scheduled Task status |
 
 ---
 
-## 开发者
+## Developers
 
-如果你拿到的是 git 仓库而不是 tarball，想改代码：
+If you cloned the repo instead of unpacking a tarball:
 
-### 前置
-- Python 3.9+、Node.js 18+、git
+### Prerequisites
+- Python 3.9+, Node.js 18+, git
 
-### 起步
+### Getting started
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/Conner2077/polars-daily-log.git
 cd polars-daily-log
-bash install.sh              # 自动识别无 wheel → dev 模式（pip install -e . + 前端源码构建）
+bash install.sh              # auto-detects no wheel → dev mode (pip install -e . + frontend source build)
 ./pdl server start
 ```
 
-### 日常
+### Day-to-day
 
-| 场景 | 命令 |
-|------|------|
-| pull 后重新 build | `./pdl build --restart` |
-| 只重建前端 | `./pdl build --no-python` |
-| 跑测试 | `.venv/bin/python -m pytest tests/ -q` |
-| 前端热更新开发 | `cd web/frontend && npm run dev` 打开 `localhost:5173` |
+| What | Command |
+|---|---|
+| Rebuild after pull | `./pdl build --restart` |
+| Frontend only | `./pdl build --no-python` |
+| Run tests | `.venv/bin/python -m pytest tests/ -q` |
+| Frontend hot-reload dev | `cd web/frontend && npm run dev`, open `localhost:5173` |
 
-### 打 release
+### Cutting a release
 
-见 [`docs/release.md`](docs/release.md)。
+See [`docs/release.md`](docs/release.md).
 
-### 项目原则
+### Project principles
 
-见 [AGENTS.md](AGENTS.md)（Claude Code 通过 `CLAUDE.md → @AGENTS.md` 加载）。核心几条：
+See [AGENTS.md](AGENTS.md) (Claude Code loads it via `CLAUDE.md → @AGENTS.md`). The core rules:
 
-- **原汁原味**：每日总结不筛选，下游（Jira 提交用 `AUTO_APPROVE_PROMPT`）二次加工
-- **两层平台代码**：raw OS API 在 `auto_daily_log/monitor/`，adapter 在 `auto_daily_log_collector/platforms/`
-- **Jira 提交唯一入口**：`jira_client.client.build_jira_client_from_db`，自带 emoji / 4-byte UTF-8 scrub
+- **Keep the raw record**: daily summaries don't filter; downstream consumers (Jira submission uses `AUTO_APPROVE_PROMPT`) do the filtering
+- **Two-layer platform code**: raw OS APIs live in `auto_daily_log/monitor/`; adapters live in `auto_daily_log_collector/platforms/`
+- **Single Jira entry point**: `jira_client.client.build_jira_client_from_db`, which handles emoji / 4-byte UTF-8 scrubbing for you
 
 ---
 
-## 许可证
+## License
 
-暂为内部 / 试用阶段。
+Apache 2.0. See [LICENSE](LICENSE).
