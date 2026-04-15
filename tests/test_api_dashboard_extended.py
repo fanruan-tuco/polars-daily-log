@@ -305,6 +305,7 @@ async def test_machines_status_online_and_offline(client_and_db):
     # Order is by last_seen DESC → online first
     assert len(data) == 2
     assert data[0] == {
+        "machine_id": "local",
         "name": "MacBook Pro",
         "online": True,
         "last_seen_hours_ago": None,

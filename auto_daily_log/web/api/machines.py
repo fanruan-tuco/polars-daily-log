@@ -45,6 +45,7 @@ async def machines_status(request: Request):
             except (ValueError, TypeError):
                 hours_ago = None
         out.append({
+            "machine_id": r.get("machine_id") or "",
             "name": r.get("name") or r.get("machine_id") or "",
             "online": online,
             "last_seen_hours_ago": hours_ago,
