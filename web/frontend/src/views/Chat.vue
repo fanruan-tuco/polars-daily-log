@@ -8,6 +8,12 @@
       </div>
       <div class="page-header-right">
         <el-button
+          round
+          size="small"
+          :disabled="busy"
+          @click="openHistory"
+        >历史</el-button>
+        <el-button
           v-if="history.length > 0 && !busy"
           round
           size="small"
@@ -22,6 +28,63 @@
         >新建对话</el-button>
       </div>
     </div>
+
+    <!-- History drawer -->
+    <el-drawer
+      v-model="historyOpen"
+      title="历史对话"
+      direction="ltr"
+      size="340px"
+      :with-header="true"
+    >
+      <div class="history-drawer">
+        <div class="history-toolbar">
+          <el-button
+            type="primary"
+            round
+            size="small"
+            class="history-new"
+            :disabled="busy"
+            @click="newFromHistory"
+          >+ 新建对话</el-button>
+        </div>
+
+        <div v-if="sessionsList.length === 0" class="history-empty">
+          还没有历史对话。
+        </div>
+
+        <ul v-else class="history-list">
+          <li
+            v-for="s in sessionsList" :key="s.id"
+            class="history-row"
+            :class="{ active: s.id === sessionId }"
+            @click="pickSession(s)"
+          >
+            <div class="history-row-main">
+              <div class="history-title" :title="s.title">{{ s.title || '(未命名)' }}</div>
+              <div class="history-meta">
+                {{ s.message_count }} 条 · {{ relativeTime(s.updated_at) }}
+              </div>
+            </div>
+            <el-popconfirm
+              title="确认删除？"
+              confirm-button-text="删除"
+              cancel-button-text="取消"
+              @confirm.stop="onDeleteSession(s)"
+            >
+              <template #reference>
+                <button
+                  class="history-del"
+                  type="button"
+                  title="删除"
+                  @click.stop
+                >×</button>
+              </template>
+            </el-popconfirm>
+          </li>
+        </ul>
+      </div>
+    </el-drawer>
 
     <!-- Chat container -->
     <div class="chat-shell">
@@ -201,6 +264,10 @@ const boxEl = ref(null)
 const sessionId = ref(null)
 // Live AbortController for the in-flight fetch — mutated on ask()/stop().
 let controller = null
+
+// History drawer state
+const historyOpen = ref(false)
+const sessionsList = ref([])  // [{id, title, updated_at, message_count}, ...]
 
 // Phase 3 — worklog extraction UI state. Lives on the latest AI bubble.
 const extracting = ref(false)
@@ -422,6 +489,93 @@ function resetChat() {
   draft.value = ''
   draftsPreview.value = null
   autosize()
+}
+
+// ─── History drawer ───────────────────────────────────────────────
+
+async function loadSessionsList() {
+  try {
+    const resp = await fetch('/api/chat/sessions')
+    if (!resp.ok) { sessionsList.value = []; return }
+    const rows = await resp.json()
+    sessionsList.value = Array.isArray(rows) ? rows : []
+  } catch (_) {
+    sessionsList.value = []
+  }
+}
+
+async function openHistory() {
+  if (busy.value) return
+  await loadSessionsList()
+  historyOpen.value = true
+}
+
+async function pickSession(s) {
+  if (busy.value) return
+  // Clicking the currently-active session is a no-op — just close.
+  if (s.id === sessionId.value) {
+    historyOpen.value = false
+    return
+  }
+  try {
+    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(s.id)}/messages`)
+    if (!resp.ok) {
+      ElMessage.error('载入失败')
+      return
+    }
+    const rows = await resp.json()
+    sessionId.value = s.id
+    sessionTitle.value = s.title || ''
+    history.value = rows.map(r => ({ role: r.role, text: r.text }))
+    draftsPreview.value = null
+    historyOpen.value = false
+    scrollToBottom()
+  } catch (_) {
+    ElMessage.error('载入失败')
+  }
+}
+
+async function onDeleteSession(s) {
+  try {
+    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(s.id)}`, {
+      method: 'DELETE',
+    })
+    if (!resp.ok && resp.status !== 204) {
+      ElMessage.error('删除失败')
+      return
+    }
+    // Refresh list. If we just deleted the active session, clear the view.
+    if (s.id === sessionId.value) resetChat()
+    await loadSessionsList()
+    ElMessage.success('已删除')
+  } catch (_) {
+    ElMessage.error('删除失败')
+  }
+}
+
+function newFromHistory() {
+  resetChat()
+  historyOpen.value = false
+}
+
+// Turn a "2026-04-15 10:23:45" timestamp from sqlite into "5 分钟前" etc.
+function relativeTime(ts) {
+  if (!ts) return ''
+  // sqlite datetime('now') returns UTC; ensure JS parses as UTC.
+  const iso = ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const diff = Math.max(0, Date.now() - d.getTime())
+  const s = Math.floor(diff / 1000)
+  if (s < 60) return '刚刚'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} 分钟前`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h} 小时前`
+  const days = Math.floor(h / 24)
+  if (days < 30) return `${days} 天前`
+  // Older than a month — show the date itself.
+  return d.toISOString().slice(0, 10)
 }
 
 function stop() {
@@ -991,6 +1145,95 @@ onMounted(async () => {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* ─── History drawer ─────────────────────────────────────────── */
+.history-drawer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.history-toolbar {
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.history-new {
+  width: 100%;
+}
+.history-empty {
+  padding: 40px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+.history-row:hover {
+  background: var(--surface-hover);
+}
+.history-row.active {
+  background: var(--surface-hover);
+  border-color: var(--line);
+}
+.history-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.history-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.history-meta {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.history-del {
+  background: transparent;
+  border: none;
+  color: var(--ink-muted);
+  font-size: 18px;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  padding: 0;
+}
+.history-row:hover .history-del {
+  opacity: 0.7;
+}
+.history-del:hover {
+  opacity: 1 !important;
+  background: rgba(209, 69, 59, 0.1);
+  color: var(--danger);
 }
 
 @media (max-width: 900px) {
