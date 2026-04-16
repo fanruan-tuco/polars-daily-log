@@ -1,6 +1,6 @@
 [project]
 name = "auto-daily-log"
-version = "0.3.0"
+version = "0.3.1"
 description = "Automated Jira worklog tool with activity monitoring and LLM summarization"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -45,3 +45,4 @@ auto_daily_log = ["frontend_dist/**/*"]
 [project.scripts]
 auto-daily-log = "auto_daily_log.__main__:main"
 auto-daily-log-collector = "auto_daily_log_collector.__main__:main"
+polars-daily-log-mcp = "auto_daily_log.mcp_server:main"

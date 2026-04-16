@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.3.1] — 2026-04-16
+
+Bug fix + 功能增量，主要解决定时任务不触发的问题。
+
+### Added
+- **Scheduler 启动补跑**：server 启动时检查当天的 daily_generate / auto_approve 是否已产出结果，如果已过触发时间但没有输出则立即补跑。解决重启后错过定时任务的问题。
+- **misfire_grace_time=7200s**：APScheduler 所有 cron job 增加 2 小时容错窗口，短暂重启后能自动补执行。
+- **MyLog 生命周期按钮**：
+  - 所有状态增加"删除"按钮（`DELETE /api/worklogs/{id}`）
+  - pending_review / approved 增加"驳回"按钮
+  - 移除语义模糊的"归档"
+- **MyLog 折叠卡片**："过去"模式下卡片默认折叠（header + 摘要预览），点击展开/收起。
+- **MyLog "今日/过去"过滤**：hover "过去"横向展开子选项（全部/每日/每周/每月/自定义），stagger 动画。选中后 tab 文字显示选中项。
+- **Chat 历史抽屉**：切换和删除历史会话。
+- **MCP Server**：`pdl mcp` 暴露 activities/worklogs/Jira 给外部 agent。
+- **`pdl query` CLI**：命令行直查数据（给脚本和 agent 用）。
+- **Scheduler 日志**：所有定时任务加 `[Scheduler]` 前缀日志（触发/完成/失败），方便排查。
+
+### Fixed
+- **定时任务静默失败**：daily_generate / auto_approve 的 LLM 异常被 APScheduler 默认吞掉，用户看到 collector 正常但没日报。修：job 函数内 try/except + print 到 server.log。
+- **"过去 → 全部"显示空**：`/api/worklogs` 不传 date 时 fallback 到今天（只返回今天数据）。修：不传 date+tag 时返回所有草稿。
+- **Classifier "daily" 误判**：`daily` 单独作为会议关键词太宽，"Polars Daily Log" 被标成 meeting。修：限定为 `daily standup/sync/scrum/huddle`。
+- **pdl build 残留 dist 目录**：构建前清理 wheel staging 目录。
+
+### Tests
+- 新增 `tests/test_scheduler_catchup.py`（11 cases）：覆盖 catch-up 逻辑、misfire、LLM 异常传播、空数据跳过等场景。
+
+---
+
 ## [0.3.0] — 2026-04-16
 
 整体 UI 重构，对齐 landing page 的 OpenAI 风格（白底 + 暖墨 `#171717` + Geist 字体 + 左侧 sidebar 导航），并新增动态时间轴、设备在线状态、MyLog 过滤器等交互能力。
