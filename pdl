@@ -389,6 +389,17 @@ do_build() {
         info "Building frontend ..."
         (cd "$fe_dir" && npm run build 2>&1 | tail -3)
         ok "Frontend built: $fe_dir/dist/"
+
+        # Clean the wheel-staging dist. It's only meant to exist during
+        # scripts/release.sh (to be packed into the wheel) and is .gitignored.
+        # When left behind from a past release attempt it shadows the freshly
+        # built dev dist and silently serves stale JS — we burned two hours
+        # on exactly that today. Wipe it on every dev build so it can't.
+        local staged_dist="$SCRIPT_DIR/auto_daily_log/frontend_dist"
+        if [[ -d "$staged_dist" ]]; then
+            rm -rf "$staged_dist"
+            ok "Cleaned stale wheel-staging dist ($staged_dist)"
+        fi
     fi
 
     if (( restart )); then
