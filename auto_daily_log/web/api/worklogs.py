@@ -592,3 +592,15 @@ async def update_issue(draft_id: int, issue_index: int, body: IssueUpdate, reque
 async def get_audit_trail(draft_id: int, request: Request):
     db = request.app.state.db
     return await db.fetch_all("SELECT * FROM audit_logs WHERE draft_id = ? ORDER BY created_at", (draft_id,))
+
+
+@router.delete("/worklogs/{draft_id}")
+async def delete_draft(draft_id: int, request: Request):
+    """Soft-delete a draft (any status). Removes draft + audit logs."""
+    db = request.app.state.db
+    existing = await db.fetch_one("SELECT id FROM worklog_drafts WHERE id = ?", (draft_id,))
+    if not existing:
+        raise HTTPException(404, "Draft not found")
+    await db.execute("INSERT INTO audit_logs (draft_id, action) VALUES (?, 'deleted')", (draft_id,))
+    await db.execute("DELETE FROM worklog_drafts WHERE id = ?", (draft_id,))
+    return {"status": "deleted"}

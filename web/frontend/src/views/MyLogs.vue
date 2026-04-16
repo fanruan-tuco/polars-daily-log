@@ -253,26 +253,57 @@
         </div>
       </template>
 
-      <!-- Card-level action buttons -->
-      <div v-if="isDailyTag(draft) && draft.status === 'pending_review'" class="log-actions">
-        <el-button type="primary" round size="small" @click="approve(draft.id)">一键通过</el-button>
+      <!-- Card-level action buttons — varies by status -->
+      <div class="log-actions">
+        <!-- pending_review: 通过 + 驳回 -->
+        <template v-if="isDailyTag(draft) && draft.status === 'pending_review'">
+          <el-button type="primary" round size="small" @click="approve(draft.id)">一键通过</el-button>
+          <el-popconfirm
+            title="驳回后该日志不再参与 Jira 提交。"
+            confirm-button-text="驳回"
+            cancel-button-text="取消"
+            :width="260"
+            @confirm="rejectDraft(draft.id)"
+          >
+            <template #reference>
+              <el-button round size="small">驳回</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+
+        <!-- approved / auto_approved: 提交 + 驳回 -->
+        <template v-if="isDailyTag(draft) && (draft.status === 'approved' || draft.status === 'auto_approved')">
+          <el-button type="primary" round size="small" @click="submitAll(draft.id)">全部提交到 Jira</el-button>
+          <el-popconfirm
+            title="驳回后该日志不再参与 Jira 提交。"
+            confirm-button-text="驳回"
+            cancel-button-text="取消"
+            :width="260"
+            @confirm="rejectDraft(draft.id)"
+          >
+            <template #reference>
+              <el-button round size="small">驳回</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+
+        <!-- submitted: 查看审计 -->
+        <template v-if="draft.status === 'submitted'">
+          <el-button round size="small" @click="showAudit(draft.id)">查看审计记录</el-button>
+        </template>
+
+        <!-- ALL statuses: 删除 -->
         <el-popconfirm
-          title="归档后进回收站，可在 Settings 恢复。"
-          confirm-button-text="归档"
+          title="删除后进回收站，可在设置中恢复。"
+          confirm-button-text="删除"
           cancel-button-text="取消"
           :width="260"
-          @confirm="archiveDraft(draft.id)"
+          @confirm="deleteDraft(draft.id)"
         >
           <template #reference>
-            <el-button round size="small" class="danger-btn">归档</el-button>
+            <el-button round size="small" class="danger-btn">删除</el-button>
           </template>
         </el-popconfirm>
-      </div>
-      <div v-else-if="isDailyTag(draft) && (draft.status === 'approved' || draft.status === 'auto_approved')" class="log-actions">
-        <el-button type="primary" round size="small" @click="submitAll(draft.id)">全部提交到 Jira</el-button>
-      </div>
-      <div v-else-if="draft.status === 'submitted'" class="log-actions">
-        <el-button round size="small" @click="showAudit(draft.id)">查看审计记录</el-button>
       </div>
       </div><!-- /.log-body -->
     </div>
@@ -617,12 +648,15 @@ async function approve(id) {
   await loadDrafts()
 }
 
-async function archiveDraft(id) {
-  // Archive = soft-delete via reject endpoint + set status=archived via update
-  // For now we reuse rejectDraft to mark as rejected (treated same as archived in UI)
-  // TODO: add a dedicated archive endpoint; for now reject semantics cover it.
+async function rejectDraft(id) {
   await api.rejectDraft(id)
-  ElMessage.warning('已归档')
+  ElMessage.warning('已驳回')
+  await loadDrafts()
+}
+
+async function deleteDraft(id) {
+  await api.deleteDraft(id)
+  ElMessage.success('已删除')
   await loadDrafts()
 }
 

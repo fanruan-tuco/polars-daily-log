@@ -22,6 +22,7 @@ export default {
   updateDraft: (id, data) => api.patch(`/worklogs/${id}`, data),
   approveDraft: (id) => api.post(`/worklogs/${id}/approve`),
   rejectDraft: (id) => api.post(`/worklogs/${id}/reject`),
+  deleteDraft: (id) => api.delete(`/worklogs/${id}`),
   approveAll: (date) => api.post('/worklogs/approve-all', null, { params: { date } }),
   submitDraft: (id) => api.post(`/worklogs/${id}/submit`),
   submitIssue: (id, index) => api.post(`/worklogs/${id}/submit-issue/${index}`),
