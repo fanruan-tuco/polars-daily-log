@@ -66,21 +66,12 @@
                 {{ s.message_count }} 条 · {{ relativeTime(s.updated_at) }}
               </div>
             </div>
-            <el-popconfirm
-              title="确认删除？"
-              confirm-button-text="删除"
-              cancel-button-text="取消"
-              @confirm.stop="onDeleteSession(s)"
-            >
-              <template #reference>
-                <button
-                  class="history-del"
-                  type="button"
-                  title="删除"
-                  @click.stop
-                >×</button>
-              </template>
-            </el-popconfirm>
+            <button
+              class="history-del"
+              type="button"
+              title="删除"
+              @click.stop="onDeleteSession(s)"
+            >×</button>
           </li>
         </ul>
       </div>
