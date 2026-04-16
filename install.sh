@@ -377,6 +377,54 @@ setup_data() {
     fi
 }
 
+# ─── Built-in LLM (optional, passphrase-protected) ───────────────────
+# Decrypts bundled builtin_llm.enc if the user supplies the author's shared
+# passphrase. Empty input = skip (user configures LLM manually in Settings).
+#
+# This is anti-scanner obfuscation, not real security. Anyone who reads this
+# script can trivially decrypt — see AGENTS.md for the threat model.
+setup_builtin_llm() {
+    local enc_file="$INSTALL_DIR/builtin_llm.enc"
+    (( INSTALL_SERVER )) || return 0
+    [[ -f "$enc_file" ]] || return 0
+
+    header "7. Built-in LLM (optional)"
+
+    if ! command -v openssl &>/dev/null; then
+        warn "openssl 不可用 — 跳过内置 LLM"
+        return 0
+    fi
+
+    local passphrase="${PDL_BUILTIN_PASSPHRASE:-}"
+    if [[ -z "$passphrase" ]]; then
+        if [[ -r /dev/tty ]]; then
+            echo "  如果作者告诉你口令，输入可自动配置 LLM；直接回车跳过。"
+            read -rp "  口令: " passphrase < /dev/tty || passphrase=""
+        else
+            info "无 tty — 跳过内置 LLM（可设 PDL_BUILTIN_PASSPHRASE 走非交互）"
+            return 0
+        fi
+    else
+        info "使用 PDL_BUILTIN_PASSPHRASE 环境变量"
+    fi
+
+    if [[ -z "$passphrase" ]]; then
+        info "跳过内置 LLM（用户可在 Settings 页自配）"
+        return 0
+    fi
+
+    local target="$DATA_DIR/builtin.key"
+    if openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 -base64 \
+        -in "$enc_file" -out "$target" -pass pass:"$passphrase" 2>/dev/null \
+        && python3 -c "import json,sys; json.load(open('$target'))" 2>/dev/null; then
+        chmod 600 "$target"
+        ok "内置 LLM 已配置 → $target"
+    else
+        rm -f "$target"
+        warn "口令错误 — 跳过内置 LLM（可后续手动跑 install.sh 重试）"
+    fi
+}
+
 # ─── Build Frontend ──────────────────────────────────────────────────
 build_frontend() {
     header "7. Frontend"
@@ -519,6 +567,7 @@ main() {
     setup_venv
     install_python_deps
     setup_data
+    setup_builtin_llm
     build_frontend
     verify
     summary

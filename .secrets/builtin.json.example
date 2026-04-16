@@ -1,0 +1,6 @@
+{
+  "engine": "openai_compat",
+  "api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "base_url": "https://api.kimi.com/coding",
+  "model": "kimi-k2"
+}

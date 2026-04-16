@@ -187,23 +187,30 @@ async def generate_summary(body: GenerateRequest, request: Request):
 async def _get_llm_engine_from_settings(db):
     """Build LLM engine from settings table (user may have configured via Web UI).
 
-    Falls back to a built-in Kimi key if user hasn't configured anything —
-    saves first-run setup friction.
+    Falls back to the install-time built-in config (~/.auto_daily_log/builtin.key)
+    if the user hasn't set their own key — saves first-run friction when the
+    author supplied a shared passphrase at install time.
     """
     from ...config import LLMConfig, LLMProviderConfig
     from ...summarizer.engine import VALID_PROTOCOLS, get_llm_engine
     from ...summarizer.url_helper import normalize_base_url
+    from ...builtin_llm import load_builtin_llm_config
 
     protocol = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_engine'") or {}).get("value", "") or "openai_compat"
     api_key = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_api_key'") or {}).get("value", "")
     model = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_model'") or {}).get("value", "")
     base_url = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_base_url'") or {}).get("value", "")
 
-    # Built-in Kimi fallback — if user hasn't configured anything, use this
-    BUILTIN_KIMI_KEY = "sk-kimi-zzkJewX4KnmDC0vtysSALlszHodfjfhOIvnqb8aWuUrh7oNPezXpr9ZgEWiOjdrr"
     if not api_key:
-        protocol = "openai_compat"
-        api_key = BUILTIN_KIMI_KEY
+        builtin = load_builtin_llm_config()
+        if builtin:
+            protocol = builtin.get("engine") or "openai_compat"
+            api_key = builtin.get("api_key", "")
+            model = model or builtin.get("model", "")
+            base_url = base_url or builtin.get("base_url", "")
+
+    if not api_key:
+        return None
 
     if protocol not in VALID_PROTOCOLS:
         protocol = "openai_compat"
@@ -485,17 +492,27 @@ async def submit_to_jira(draft_id: int, request: Request):
             )
             issues[i]["jira_worklog_id"] = str(result.get("id", ""))
             results.append({"issue_key": issue["issue_key"], "jira_worklog_id": issues[i]["jira_worklog_id"]})
+            # One audit row per issue — same shape as the per-issue endpoint
+            # so the timeline UI doesn't need to handle a "batch" special case.
+            await db.execute(
+                "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
+                "VALUES (?, 'submitted_issue', ?, ?, ?, 'manual_all')",
+                (draft_id, json.dumps({"issue_key": issue["issue_key"], "result": result}, ensure_ascii=False),
+                 i, issue["issue_key"]),
+            )
         except Exception as e:
             results.append({"issue_key": issue["issue_key"], "error": str(e)})
+            await db.execute(
+                "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
+                "VALUES (?, 'submit_failed_issue', ?, ?, ?, 'manual_all')",
+                (draft_id, json.dumps({"issue_key": issue["issue_key"], "error": str(e)}, ensure_ascii=False),
+                 i, issue["issue_key"]),
+            )
 
     # Update summary with jira_worklog_ids
     await db.execute(
         "UPDATE worklog_drafts SET summary = ?, status = 'submitted', updated_at = datetime('now') WHERE id = ?",
         (json.dumps(issues, ensure_ascii=False), draft_id),
-    )
-    await db.execute(
-        "INSERT INTO audit_logs (draft_id, action, jira_response) VALUES (?, 'submitted', ?)",
-        (draft_id, json.dumps(results, ensure_ascii=False)),
     )
     return {"status": "submitted", "results": results}
 
@@ -544,8 +561,11 @@ async def submit_single_issue(draft_id: int, issue_index: int, request: Request)
         (json.dumps(issues, ensure_ascii=False), new_status, draft_id),
     )
     await db.execute(
-        "INSERT INTO audit_logs (draft_id, action, jira_response) VALUES (?, 'submitted_issue', ?)",
-        (draft_id, json.dumps({"issue_index": issue_index, "issue_key": issue["issue_key"], "result": result}, ensure_ascii=False)),
+        "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
+        "VALUES (?, 'submitted_issue', ?, ?, ?, 'manual_single')",
+        (draft_id,
+         json.dumps({"issue_key": issue["issue_key"], "result": result}, ensure_ascii=False),
+         issue_index, issue["issue_key"]),
     )
     return {"status": "submitted", "issue_key": issue["issue_key"], "jira_worklog_id": issues[issue_index]["jira_worklog_id"], "all_submitted": all_submitted}
 
