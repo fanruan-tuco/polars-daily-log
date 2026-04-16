@@ -209,12 +209,20 @@ class Application:
         if not self.config.scheduler.enabled:
             return
 
+        import logging
+        _sched_tag = "[Scheduler]"
+
+        # misfire_grace_time: if the server was down when the job should have
+        # fired, APScheduler will still run it within this window (seconds).
+        MISFIRE_GRACE = 2 * 60 * 60  # 2 hours
+
         self.scheduler = AsyncIOScheduler()
 
         # Daily log generation job
         gen_hour, gen_minute = map(int, self.config.scheduler.trigger_time.split(":"))
 
         async def daily_generate_job():
+            print("daily_generate triggered")
             engine = get_llm_engine(self.config.llm)
             workflow = DailyWorkflow(
                 self.db,
@@ -231,9 +239,11 @@ class Application:
                 today = datetime.now().strftime("%Y-%m-%d")
                 await indexer.index_worklogs(today)
                 await indexer.index_commits(today)
+            print("daily_generate completed")
 
         self.scheduler.add_job(
-            daily_generate_job, "cron", hour=gen_hour, minute=gen_minute, id="daily_generate"
+            daily_generate_job, "cron", hour=gen_hour, minute=gen_minute,
+            id="daily_generate", misfire_grace_time=MISFIRE_GRACE,
         )
 
         # Auto-approve + submit job (separate trigger time)
@@ -241,6 +251,7 @@ class Application:
             approve_hour, approve_minute = map(int, self.config.auto_approve.trigger_time.split(":"))
 
             async def auto_approve_job():
+                print("auto_approve triggered")
                 engine = get_llm_engine(self.config.llm)
                 workflow = DailyWorkflow(
                     self.db,
@@ -250,13 +261,16 @@ class Application:
                 )
                 today = datetime.now().strftime("%Y-%m-%d")
                 await workflow.auto_approve_and_submit(today)
+                print("auto_approve completed")
 
             self.scheduler.add_job(
-                auto_approve_job, "cron", hour=approve_hour, minute=approve_minute, id="auto_approve"
+                auto_approve_job, "cron", hour=approve_hour, minute=approve_minute,
+                id="auto_approve", misfire_grace_time=MISFIRE_GRACE,
             )
 
         # Activity cleanup job — runs daily at 03:00
         async def activity_cleanup_job():
+            print("activity_cleanup triggered")
             retention = self.config.system.activity_retention_days
             recycle = self.config.system.recycle_retention_days
             # Soft-delete activities older than retention days
@@ -272,10 +286,52 @@ class Application:
             )
 
         self.scheduler.add_job(
-            activity_cleanup_job, "cron", hour=3, minute=0, id="activity_cleanup"
+            activity_cleanup_job, "cron", hour=3, minute=0,
+            id="activity_cleanup", misfire_grace_time=MISFIRE_GRACE,
         )
 
         self.scheduler.start()
+        approve_str = f"{approve_hour}:{approve_minute:02d}" if self.config.auto_approve.enabled else "disabled"
+        print(f"[Scheduler] Started: daily_generate={gen_hour}:{gen_minute:02d}, auto_approve={approve_str}, cleanup=03:00, misfire_grace={MISFIRE_GRACE}s")
+
+        # ── Startup catch-up: if we missed today's jobs, run them now ──
+        import asyncio
+        asyncio.ensure_future(self._scheduler_catchup(gen_hour, gen_minute, daily_generate_job,
+                                                       auto_approve_job if self.config.auto_approve.enabled else None,
+                                                       approve_hour if self.config.auto_approve.enabled else None,
+                                                       approve_minute if self.config.auto_approve.enabled else None))
+
+    async def _scheduler_catchup(self, gen_h, gen_m, gen_fn, approve_fn, approve_h, approve_m):
+        """If the server starts after a scheduled time and today's job hasn't
+        produced output yet, run it immediately as catch-up."""
+        now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
+
+        existing = await self.db.fetch_one(
+            "SELECT id FROM worklog_drafts WHERE date = ? AND tag = 'daily'", (today,)
+        )
+
+        gen_time = now.replace(hour=gen_h, minute=gen_m, second=0, microsecond=0)
+        if now > gen_time and not existing:
+            print(f"[Scheduler:Catchup] daily_generate missed for {today}, running now")
+            try:
+                await gen_fn()
+                print(f"[Scheduler:Catchup] daily_generate catch-up completed")
+            except Exception as e:
+                print(f"[Scheduler:Catchup] daily_generate failed: {e}")
+
+        if approve_fn and approve_h is not None:
+            approve_time = now.replace(hour=approve_h, minute=approve_m, second=0, microsecond=0)
+            auto_approved = await self.db.fetch_one(
+                "SELECT id FROM worklog_drafts WHERE date = ? AND status IN ('auto_approved', 'submitted')", (today,)
+            )
+            if now > approve_time and not auto_approved:
+                print(f"[Scheduler:Catchup] auto_approve missed for {today}, running now")
+                try:
+                    await approve_fn()
+                    print(f"[Scheduler:Catchup] auto_approve catch-up completed")
+                except Exception as e:
+                    print(f"[Scheduler:Catchup] auto_approve failed: {e}")
 
     async def run(self) -> None:
         await self._init_db()
