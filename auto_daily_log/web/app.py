@@ -19,10 +19,14 @@ def create_app(db: Database) -> FastAPI:
     app.include_router(machines.router, prefix="/api")
     from fastapi.staticfiles import StaticFiles
     from pathlib import Path
-    # Prefer packaged dist (release wheel); fall back to dev source tree.
+    # Resolve the frontend dist directory.
+    # Prefer the dev-repo tree when present: `pdl build` writes there on
+    # every rebuild, while the wheel-installed copy under `frontend_dist/`
+    # only changes on reinstall and quickly goes stale in dev. Fall back
+    # to the wheel copy for users who installed via pip.
     candidates = [
-        Path(__file__).resolve().parent.parent / "frontend_dist",           # installed wheel
         Path(__file__).resolve().parent.parent.parent / "web" / "frontend" / "dist",  # dev repo
+        Path(__file__).resolve().parent.parent / "frontend_dist",           # installed wheel
     ]
     for p in candidates:
         if p.exists() and (p / "index.html").exists():
