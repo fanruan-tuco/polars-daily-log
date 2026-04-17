@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.5] — 2026-04-17
+
+Hotfix: `curl | bash` 交互 prompt 修复。
+
+### Fixed
+- **bootstrap.sh**: 用 `bash install.sh < /dev/tty` 把终端接给 install.sh，解决 `curl | bash` 下用户键入无响应
+- **install.sh tty_read**: 优先检查 `[[ -t 0 ]]`（stdin 已是 tty），再 fallback `< /dev/tty`，再 fallback 默认值
+
+### Added
+- **真实安装测试** (`test_install_real.py`, @slow): 从零装 server/both/collector + 升级保留 settings/activities/worklogs/config，共 9 个用例，真 wheel 真 pip
+- **测试覆盖矩阵** (`docs/test-coverage.md`): 全场景清单 + 新功能测试要求写入 AGENTS.md
+
+---
+
 ## [0.5.4] — 2026-04-17
 
 安装全流程修复（server/both/collector 三角色验证通过）。
