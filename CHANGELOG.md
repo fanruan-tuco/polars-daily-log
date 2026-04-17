@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.5.0] — 2026-04-17
+
+安装即用 + 自更新 + UI 打磨。新用户口令解密自动配 LLM、Web UI 一键升级、Jira 头像集成、响应式布局修复。
+
+### Added
+- **内置 LLM 口令解密**：安装时输入作者分享的口令，自动配好 Kimi；直接回车跳过。密文入库，明文不暴露给 GitHub 扫描器。(`scripts/encrypt-builtin.sh` + `install.sh` 交互)
+- **Web UI 自更新**：Settings → 自动更新 tab，检测 / 下载 / 备份 / 升级全流程，三平台支持。
+- **Jira 头像缓存**：登录后自动下载 48x48 头像到本地，侧边栏展示真实头像（降级到首字母圆圈）。
+- **昵称设置**：Settings → 个人资料 tab，侧边栏显示优先级：昵称 > Jira displayName > 'User'。
+- **CodeRabbit**：`.coderabbit.yaml` 按 AGENTS.md 原则配置 per-path review 规则。
+- **审计时间轴中文化**：`created→创建`、`auto_approved→自动审批`、`submitted→已提交 Jira` 等。
+- **每条 Issue 独立审计**：worklog 提交时按 issue 记录审计日志。
+- **Ingest row_ids**：活动上传返回精确行 ID 列表（不再假设连续）。
+
+### Fixed
+- **Dashboard 响应式溢出**：`grid-template-columns` 改用 `minmax(0, 1fr)`，窗口缩小时卡片正常收缩。断点提升到 1280px。
+- **审计时间显示 UTC**：SQLite `datetime('now')` 存的是 UTC，前端转本地时区显示。
+- **Settings select/input 高度不一致**：统一 34px + 同样 padding。
+- **Settings tab 滚动条外露**：`scrollbar-width: none` 隐藏。
+- **Anthropic 连接检查挂起**：改为 stream 模式避免某些 endpoint 超时。
+- **DB 路径硬编码**：`~/.auto_daily_log` 改为从 config 解析。
+- **CI flaky tests**：最后一条活动用 `datetime.now()` 锚定 "online"；timeline 断言去时钟依赖。
+
+### Changed
+- 侧边栏 logo 点击跳转官网（新标签页 + hover 透明度反馈）。
+- Landing page 版本标记更新到 v0.4.0，安装代码块加复制按钮。
+
+---
+
 ## [0.4.0] — 2026-04-16
 
 Chat Agent + E2E 测试覆盖。新增基于 LLM 的对话式日志助手，可以查询活动、生成工时、推送 Jira，全部通过自然语言完成。
