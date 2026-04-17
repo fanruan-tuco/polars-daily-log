@@ -204,15 +204,11 @@ class Application:
                  token_hash),
             )
 
+    _MISFIRE_GRACE = 2 * 60 * 60  # 2 hours
+
     def _init_scheduler(self) -> None:
         if not self.config.scheduler.enabled:
             return
-
-        import json as _json
-
-        # misfire_grace_time: if the server was down when the job should have
-        # fired, APScheduler will still run it within this window (seconds).
-        MISFIRE_GRACE = 2 * 60 * 60  # 2 hours
 
         self.scheduler = AsyncIOScheduler()
 
@@ -222,7 +218,10 @@ class Application:
 
         async def _scope_generate_job(scope_name: str):
             """Triggered by APScheduler cron for a specific time_scope."""
+            import time as _time
             print(f"[ScopeScheduler] generate triggered for scope '{scope_name}'")
+            t0 = _time.monotonic()
+            today = datetime.now().strftime("%Y-%m-%d")
             try:
                 from .web.api.worklogs import _get_llm_engine_from_settings
                 engine = await _get_llm_engine_from_settings(self.db)
@@ -231,10 +230,9 @@ class Application:
 
                 # Activity backfill before daily generation
                 scope = await self.db.fetch_one(
-                    "SELECT * FROM summary_types WHERE name = ?", (scope_name,)
+                    "SELECT * FROM time_scopes WHERE name = ?", (scope_name,)
                 )
                 if scope and scope["scope_type"] == "day" and self._activity_summarizer:
-                    today = datetime.now().strftime("%Y-%m-%d")
                     try:
                         processed = await self._activity_summarizer.backfill_for_date(today, timeout_sec=60)
                         print(f"[ScopeScheduler] activity backfill processed {processed} row(s)")
@@ -250,8 +248,6 @@ class Application:
                         print(f"[ScopeScheduler] git collect failed (non-fatal): {e}")
 
                 from .web.api.summaries import generate_scope
-                today = datetime.now().strftime("%Y-%m-%d")
-
                 # Delete existing summaries for this scope+date (force overwrite)
                 existing = await self.db.fetch_all(
                     "SELECT id FROM summaries WHERE scope_name = ? AND date = ?",
@@ -262,12 +258,21 @@ class Application:
                     await self.db.execute("DELETE FROM summaries WHERE id = ?", (ex["id"],))
 
                 created = await generate_scope(self.db, engine, scope_name, today)
-                print(f"[ScopeScheduler] generate completed for '{scope_name}': {len(created)} summaries")
+                duration_ms = int((_time.monotonic() - t0) * 1000)
+                print(f"[ScopeScheduler] generate completed for '{scope_name}': {len(created)} summaries in {duration_ms}ms")
+
+                # Record success
+                await self.db.execute(
+                    "INSERT INTO scheduler_runs (scope_name, trigger_type, target_date, status, summaries_created, duration_ms) "
+                    "VALUES (?, 'cron', ?, 'success', ?, ?)",
+                    (scope_name, today, len(created), duration_ms),
+                )
 
                 # Also dual-write to worklog_drafts for backward compat
                 from .web.api.summaries import _dual_write_drafts, _resolve_scope_period
-                ps, pe = _resolve_scope_period(scope["scope_type"], today)
-                await _dual_write_drafts(self.db, created, scope_name, today, ps, pe)
+                if scope:
+                    ps, pe = _resolve_scope_period(scope["scope_type"], today)
+                    await _dual_write_drafts(self.db, created, scope_name, today, ps, pe)
 
                 # Index for search
                 emb_engine = get_embedding_engine(self.config.llm, self.config.embedding)
@@ -277,56 +282,20 @@ class Application:
                     await indexer.index_commits(today)
 
             except Exception as e:
+                duration_ms = int((_time.monotonic() - t0) * 1000)
                 print(f"[ScopeScheduler] generate FAILED for '{scope_name}': {type(e).__name__}: {e}")
+                await self.db.execute(
+                    "INSERT INTO scheduler_runs (scope_name, trigger_type, target_date, status, duration_ms, error) "
+                    "VALUES (?, 'cron', ?, 'failed', ?, ?)",
+                    (scope_name, today, duration_ms, f"{type(e).__name__}: {e}"),
+                )
+
+        self._scope_generate_fn = _scope_generate_job
 
         async def _register_scope_jobs():
-            scopes = await self.db.fetch_all(
-                "SELECT * FROM summary_types WHERE schedule_rule IS NOT NULL AND enabled = 1"
+            return await self._register_scope_jobs_impl(
+                _scope_generate_job, self._MISFIRE_GRACE
             )
-            job_ids = []
-            for scope in scopes:
-                try:
-                    rule = _json.loads(scope["schedule_rule"])
-                except (_json.JSONDecodeError, TypeError):
-                    continue
-
-                hour, minute = 18, 0  # default
-                if "time" in rule:
-                    parts = rule["time"].split(":")
-                    hour, minute = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
-
-                # Settings UI override: user can change trigger time for daily scope
-                if scope["name"] == "daily":
-                    row = await self.db.fetch_one(
-                        "SELECT value FROM settings WHERE key = 'scheduler_trigger_time'"
-                    )
-                    if row and row.get("value"):
-                        try:
-                            oh, om = row["value"].split(":")
-                            hour, minute = int(oh), int(om)
-                        except (ValueError, AttributeError):
-                            pass
-
-                cron_kwargs = {"hour": hour, "minute": minute}
-                if "day" in rule:
-                    # weekly: day_of_week
-                    day_map = {"monday": "mon", "tuesday": "tue", "wednesday": "wed",
-                               "thursday": "thu", "friday": "fri", "saturday": "sat", "sunday": "sun"}
-                    cron_kwargs["day_of_week"] = day_map.get(rule["day"].lower(), rule["day"])
-                if "day_of_month" in rule:
-                    cron_kwargs["day"] = rule["day_of_month"]
-
-                job_id = f"scope_{scope['name']}"
-                self.scheduler.add_job(
-                    _scope_generate_job, "cron",
-                    args=[scope["name"]],
-                    id=job_id,
-                    misfire_grace_time=MISFIRE_GRACE,
-                    **cron_kwargs,
-                )
-                job_ids.append(f"{scope['name']}={hour}:{minute:02d}")
-
-            return job_ids
 
         # Activity cleanup job — runs daily at 03:00
         async def activity_cleanup_job():
@@ -345,7 +314,7 @@ class Application:
 
         self.scheduler.add_job(
             activity_cleanup_job, "cron", hour=3, minute=0,
-            id="activity_cleanup", misfire_grace_time=MISFIRE_GRACE,
+            id="activity_cleanup", misfire_grace_time=self._MISFIRE_GRACE,
         )
 
         # Register scope jobs asynchronously after DB is ready
@@ -354,12 +323,73 @@ class Application:
         async def _setup_and_start():
             job_ids = await _register_scope_jobs()
             self.scheduler.start()
-            print(f"[ScopeScheduler] Started: {', '.join(job_ids)}, cleanup=03:00, misfire_grace={MISFIRE_GRACE}s")
+            print(f"[ScopeScheduler] Started: {', '.join(job_ids)}, cleanup=03:00, misfire_grace={self._MISFIRE_GRACE}s")
 
             # Catch-up: check if today's scopes have been generated
             await self._scheduler_catchup()
 
         asyncio.ensure_future(_setup_and_start())
+
+    async def reload_scheduler_jobs(self) -> list[str]:
+        """Hot-reload scope cron jobs without restarting the server.
+
+        Called by the scopes API after create/update/delete so schedule
+        changes take effect immediately.
+        """
+        if not self.scheduler:
+            return []
+        # Remove all existing scope_* jobs
+        for job in self.scheduler.get_jobs():
+            if job.id.startswith("scope_"):
+                job.remove()
+        # Re-register from DB
+        job_ids = await self._register_scope_jobs_impl(
+            self._scope_generate_fn, self._MISFIRE_GRACE
+        )
+        print(f"[ScopeScheduler] Reloaded: {', '.join(job_ids) or '(none)'}")
+        return job_ids
+
+    async def _register_scope_jobs_impl(self, job_func, misfire_grace: int) -> list[str]:
+        """Read time_scopes with schedule_rule and register APScheduler cron jobs.
+
+        Extracted as a method so tests can call it directly without
+        going through the full _init_scheduler (which fires ensure_future).
+        """
+        import json as _json
+        scopes = await self.db.fetch_all(
+            "SELECT * FROM time_scopes WHERE schedule_rule IS NOT NULL AND enabled = 1"
+        )
+        job_ids = []
+        for scope in scopes:
+            try:
+                rule = _json.loads(scope["schedule_rule"])
+            except (_json.JSONDecodeError, TypeError):
+                continue
+
+            hour, minute = 18, 0
+            if "time" in rule:
+                parts = rule["time"].split(":")
+                hour, minute = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+
+            cron_kwargs = {"hour": hour, "minute": minute}
+            if "day" in rule:
+                day_map = {"monday": "mon", "tuesday": "tue", "wednesday": "wed",
+                           "thursday": "thu", "friday": "fri", "saturday": "sat", "sunday": "sun"}
+                cron_kwargs["day_of_week"] = day_map.get(rule["day"].lower(), rule["day"])
+            if "day_of_month" in rule:
+                cron_kwargs["day"] = rule["day_of_month"]
+
+            job_id = f"scope_{scope['name']}"
+            self.scheduler.add_job(
+                job_func, "cron",
+                args=[scope["name"]],
+                id=job_id,
+                misfire_grace_time=misfire_grace,
+                **cron_kwargs,
+            )
+            job_ids.append(f"{scope['name']}={hour}:{minute:02d}")
+
+        return job_ids
 
     async def _scheduler_catchup(self):
         """If the server starts after a scheduled time and today's scopes
@@ -369,7 +399,7 @@ class Application:
         today = now.strftime("%Y-%m-%d")
 
         scopes = await self.db.fetch_all(
-            "SELECT * FROM summary_types WHERE schedule_rule IS NOT NULL AND enabled = 1"
+            "SELECT * FROM time_scopes WHERE schedule_rule IS NOT NULL AND enabled = 1"
         )
         for scope in scopes:
             try:
@@ -382,30 +412,25 @@ class Application:
                 parts = rule["time"].split(":")
                 hour, minute = int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
 
-            # Settings UI override (same logic as _register_scope_jobs)
-            if scope["name"] == "daily":
-                override = await self.db.fetch_one(
-                    "SELECT value FROM settings WHERE key = 'scheduler_trigger_time'"
-                )
-                if override and override.get("value"):
-                    try:
-                        oh, om = override["value"].split(":")
-                        hour, minute = int(oh), int(om)
-                    except (ValueError, AttributeError):
-                        pass
-
             trigger_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if now <= trigger_time:
                 continue  # Not past trigger time yet
 
+            # Check by period (not generation date) — same scope + same
+            # calendar period = already done. Avoids re-generating when the
+            # server restarts multiple times in one day.
+            from .web.api.summaries import _resolve_scope_period
+            ps, pe = _resolve_scope_period(scope["scope_type"], today)
             existing = await self.db.fetch_one(
-                "SELECT id FROM summaries WHERE scope_name = ? AND date = ?",
-                (scope["name"], today),
+                "SELECT id FROM summaries WHERE scope_name = ? AND period_start = ? AND period_end = ?",
+                (scope["name"], ps, pe),
             )
             if existing:
-                continue  # Already generated
+                continue  # Already generated for this period
 
+            import time as _time
             print(f"[ScopeScheduler:Catchup] '{scope['name']}' missed for {today}, running now")
+            t0 = _time.monotonic()
             try:
                 from .web.api.worklogs import _get_llm_engine_from_settings
                 engine = await _get_llm_engine_from_settings(self.db)
@@ -414,9 +439,21 @@ class Application:
 
                 from .web.api.summaries import generate_scope
                 created = await generate_scope(self.db, engine, scope["name"], today)
-                print(f"[ScopeScheduler:Catchup] '{scope['name']}' catch-up completed: {len(created)} summaries")
+                duration_ms = int((_time.monotonic() - t0) * 1000)
+                print(f"[ScopeScheduler:Catchup] '{scope['name']}' catch-up completed: {len(created)} summaries in {duration_ms}ms")
+                await self.db.execute(
+                    "INSERT INTO scheduler_runs (scope_name, trigger_type, target_date, status, summaries_created, duration_ms) "
+                    "VALUES (?, 'catchup', ?, 'success', ?, ?)",
+                    (scope["name"], today, len(created), duration_ms),
+                )
             except Exception as e:
+                duration_ms = int((_time.monotonic() - t0) * 1000)
                 print(f"[ScopeScheduler:Catchup] '{scope['name']}' failed: {e}")
+                await self.db.execute(
+                    "INSERT INTO scheduler_runs (scope_name, trigger_type, target_date, status, duration_ms, error) "
+                    "VALUES (?, 'catchup', ?, 'failed', ?, ?)",
+                    (scope["name"], today, duration_ms, str(e)),
+                )
 
     async def run(self) -> None:
         await self._init_db()

@@ -120,6 +120,60 @@ CREATE TABLE IF NOT EXISTS summary_types (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS time_scopes (
+    name TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    scope_type TEXT NOT NULL,
+    schedule_rule TEXT,
+    is_builtin INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS scope_outputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_name TEXT NOT NULL REFERENCES time_scopes(name),
+    display_name TEXT NOT NULL,
+    output_mode TEXT DEFAULT 'single',
+    issue_source TEXT,
+    prompt_template TEXT,
+    publisher_name TEXT,
+    publisher_config TEXT DEFAULT '{}',
+    auto_publish INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_name TEXT NOT NULL,
+    output_id INTEGER NOT NULL REFERENCES scope_outputs(id),
+    date TEXT NOT NULL,
+    period_start TEXT,
+    period_end TEXT,
+    issue_key TEXT,
+    time_spent_sec INTEGER,
+    content TEXT,
+    published_id TEXT,
+    published_at TEXT,
+    publisher_name TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_summaries_date ON summaries(date, scope_name);
+
+CREATE TABLE IF NOT EXISTS scheduler_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_name TEXT NOT NULL,
+    trigger_type TEXT NOT NULL,
+    target_date TEXT,
+    status TEXT NOT NULL,
+    summaries_created INTEGER DEFAULT 0,
+    duration_ms INTEGER,
+    error TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_scheduler_runs_created ON scheduler_runs(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS collectors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     machine_id TEXT UNIQUE NOT NULL,
@@ -258,11 +312,13 @@ class Database:
 
         # Seed built-in summary types (idempotent — INSERT OR IGNORE).
         _BUILTIN_TYPES = [
-            ("daily",   "每日日志", '{"type":"day"}',
+            ("daily",     "每日日志", '{"type":"day"}',
              '{"type":"daily","time":"18:00"}', "summarize", "auto", "jira", "{}"),
-            ("weekly",  "周报",     '{"type":"week"}',
+            ("weekly",    "周报",     '{"type":"week"}',
              None, "period_summary", "manual", None, "{}"),
-            ("monthly", "月报",     '{"type":"month"}',
+            ("monthly",   "月报",     '{"type":"month"}',
+             None, "period_summary", "manual", None, "{}"),
+            ("quarterly", "季报",     '{"type":"quarter"}',
              None, "period_summary", "manual", None, "{}"),
         ]
         for name, disp, scope, sched, prompt, review, pub, pub_cfg in _BUILTIN_TYPES:
@@ -274,7 +330,179 @@ class Database:
                 (name, disp, scope, sched, prompt, review, pub, pub_cfg),
             )
 
+        # ── Pipeline refactor: time_scopes + scope_outputs + summaries ──
+        await self._migrate_pipeline()
+
         await self._conn.commit()
+
+    async def _migrate_pipeline(self) -> None:
+        """Seed time_scopes / scope_outputs from summary_types; migrate worklog_drafts → summaries."""
+        import json as _json
+
+        # audit_logs: add summary_id for new pipeline rows
+        audit_cols = await self.fetch_all("PRAGMA table_info(audit_logs)")
+        audit_col_names = {c["name"] for c in audit_cols}
+        if "summary_id" not in audit_col_names:
+            await self._conn.execute("ALTER TABLE audit_logs ADD COLUMN summary_id INTEGER")
+
+        # 1. Seed time_scopes from summary_types (idempotent)
+        ts_count = await self._conn.execute("SELECT COUNT(*) AS n FROM time_scopes")
+        ts_row = await ts_count.fetchone()
+        if ts_row["n"] == 0:
+            st_rows = await self.fetch_all("SELECT * FROM summary_types")
+            _SCOPE_TYPE_MAP = {"day": "day", "week": "week", "month": "month"}
+            for st in st_rows:
+                try:
+                    scope_rule = _json.loads(st["scope_rule"]) if st["scope_rule"] else {}
+                except (_json.JSONDecodeError, TypeError):
+                    scope_rule = {}
+                scope_type = _SCOPE_TYPE_MAP.get(scope_rule.get("type", ""), "custom")
+                # Convert schedule_rule: summary_types stores {"type":"daily","time":"18:00"}
+                # time_scopes stores {"time":"18:00"} (scope_type already implies cadence)
+                sched = None
+                if st.get("schedule_rule"):
+                    try:
+                        sr = _json.loads(st["schedule_rule"])
+                        sr.pop("type", None)
+                        sched = _json.dumps(sr, ensure_ascii=False) if sr else None
+                    except (_json.JSONDecodeError, TypeError):
+                        pass
+                await self._conn.execute(
+                    "INSERT OR IGNORE INTO time_scopes "
+                    "(name, display_name, scope_type, schedule_rule, is_builtin, enabled) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (st["name"], st["display_name"], scope_type, sched,
+                     st.get("is_builtin", 0), st.get("enabled", 1)),
+                )
+
+        # 2. Seed default scope_outputs (idempotent)
+        so_count = await self._conn.execute("SELECT COUNT(*) AS n FROM scope_outputs")
+        so_row = await so_count.fetchone()
+        if so_row["n"] == 0:
+            # daily → two outputs: full summary (archive) + Jira per-issue
+            await self._conn.execute(
+                "INSERT INTO scope_outputs "
+                "(scope_name, display_name, output_mode, issue_source, "
+                "prompt_template, publisher_name, publisher_config, auto_publish) "
+                "VALUES ('daily', '原汁原味日志', 'single', NULL, NULL, NULL, '{}', 0)"
+            )
+            await self._conn.execute(
+                "INSERT INTO scope_outputs "
+                "(scope_name, display_name, output_mode, issue_source, "
+                "prompt_template, publisher_name, publisher_config, auto_publish) "
+                "VALUES ('daily', 'Jira 工时日志', 'per_issue', 'jira', NULL, 'jira', '{}', 1)"
+            )
+            # weekly / monthly → single summary, no publisher
+            await self._conn.execute(
+                "INSERT INTO scope_outputs "
+                "(scope_name, display_name, output_mode, issue_source, "
+                "prompt_template, publisher_name, publisher_config, auto_publish) "
+                "VALUES ('weekly', '周报', 'single', NULL, NULL, NULL, '{}', 0)"
+            )
+            await self._conn.execute(
+                "INSERT INTO scope_outputs "
+                "(scope_name, display_name, output_mode, issue_source, "
+                "prompt_template, publisher_name, publisher_config, auto_publish) "
+                "VALUES ('monthly', '月报', 'single', NULL, NULL, NULL, '{}', 0)"
+            )
+            await self._conn.execute(
+                "INSERT INTO scope_outputs "
+                "(scope_name, display_name, output_mode, issue_source, "
+                "prompt_template, publisher_name, publisher_config, auto_publish) "
+                "VALUES ('quarterly', '季报', 'single', NULL, NULL, NULL, '{}', 0)"
+            )
+
+        # Ensure quarterly scope_output exists (added in v0.6.0; older DBs lack it)
+        q_out = await self._conn.execute(
+            "SELECT id FROM scope_outputs WHERE scope_name = 'quarterly'"
+        )
+        if not await q_out.fetchone():
+            await self._conn.execute(
+                "INSERT INTO scope_outputs "
+                "(scope_name, display_name, output_mode, issue_source, "
+                "prompt_template, publisher_name, publisher_config, auto_publish) "
+                "VALUES ('quarterly', '季报', 'single', NULL, NULL, NULL, '{}', 0)"
+            )
+
+        # 3. Migrate worklog_drafts → summaries (idempotent: only if summaries empty)
+        sum_count = await self._conn.execute("SELECT COUNT(*) AS n FROM summaries")
+        sum_row = await sum_count.fetchone()
+        if sum_row["n"] > 0:
+            return  # already migrated
+
+        drafts = await self.fetch_all("SELECT * FROM worklog_drafts")
+        if not drafts:
+            return
+
+        # Lookup scope_outputs by (scope_name, output_mode)
+        outputs = await self.fetch_all("SELECT * FROM scope_outputs")
+        _output_map: dict[tuple[str, str], int] = {}
+        for o in outputs:
+            _output_map[(o["scope_name"], o["output_mode"])] = o["id"]
+
+        for draft in drafts:
+            tag = draft.get("tag") or "daily"
+            scope_name = tag if tag in ("daily", "weekly", "monthly") else "daily"
+
+            # 3a. full_summary → single output row
+            full_summary = draft.get("full_summary")
+            single_output_id = _output_map.get((scope_name, "single"))
+            if full_summary and single_output_id:
+                await self._conn.execute(
+                    "INSERT INTO summaries "
+                    "(scope_name, output_id, date, period_start, period_end, "
+                    "content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (scope_name, single_output_id, draft["date"],
+                     draft.get("period_start"), draft.get("period_end"),
+                     full_summary, draft.get("created_at")),
+                )
+
+            # 3b. per-issue JSON entries → per_issue output rows
+            per_issue_output_id = _output_map.get((scope_name, "per_issue"))
+            if per_issue_output_id and draft.get("summary"):
+                try:
+                    issues = _json.loads(draft["summary"])
+                except (_json.JSONDecodeError, TypeError):
+                    issues = []
+                if isinstance(issues, list):
+                    for issue in issues:
+                        if not isinstance(issue, dict):
+                            continue
+                        issue_key = issue.get("issue_key")
+                        if not issue_key or issue_key == "OTHER":
+                            continue
+                        try:
+                            hours = float(issue.get("time_spent_hours", 0))
+                        except (TypeError, ValueError):
+                            hours = 0
+                        time_sec = int(hours * 3600)
+                        pub_id = issue.get("jira_worklog_id")
+                        await self._conn.execute(
+                            "INSERT INTO summaries "
+                            "(scope_name, output_id, date, period_start, period_end, "
+                            "issue_key, time_spent_sec, content, published_id, "
+                            "published_at, publisher_name, created_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (scope_name, per_issue_output_id, draft["date"],
+                             draft.get("period_start"), draft.get("period_end"),
+                             issue_key, time_sec,
+                             issue.get("summary", ""),
+                             pub_id,
+                             draft.get("updated_at") if pub_id else None,
+                             "jira" if pub_id else None,
+                             draft.get("created_at")),
+                        )
+            elif not per_issue_output_id and draft.get("summary") and scope_name != "daily":
+                # weekly/monthly: summary text stored directly
+                if single_output_id and not full_summary:
+                    await self._conn.execute(
+                        "INSERT INTO summaries "
+                        "(scope_name, output_id, date, period_start, period_end, "
+                        "content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (scope_name, single_output_id, draft["date"],
+                         draft.get("period_start"), draft.get("period_end"),
+                         draft["summary"], draft.get("created_at")),
+                    )
 
     async def close(self) -> None:
         if self._conn:

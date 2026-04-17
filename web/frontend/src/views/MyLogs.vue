@@ -14,7 +14,7 @@
           :disabled="generating"
           @click="generate(scope.name)"
         >{{ scope.display_name }}</el-button>
-        <router-link to="/settings?tab=scopes" class="add-type-link" title="管理触发范围">
+        <router-link to="/settings?tab=scopes" class="add-type-link" title="管理总结周期">
           <el-button round size="small">+</el-button>
         </router-link>
       </div>
@@ -360,7 +360,7 @@ function issueTitle(key) { return issueTitleMap.value[key] || '' }
 function isSkippedIssue(key) { return ['ALL', 'DAILY'].includes(key) }
 
 function scopeLabel(name) {
-  const map = { daily: '每日', weekly: '每周', monthly: '每月' }
+  const map = { daily: '每日', weekly: '每周', monthly: '每月', quarterly: '每季' }
   return map[name] || name
 }
 
@@ -379,6 +379,7 @@ async function loadScopes() {
       { name: 'daily', display_name: '每日日志', scope_type: 'day', enabled: 1 },
       { name: 'weekly', display_name: '周报', scope_type: 'week', enabled: 1 },
       { name: 'monthly', display_name: '月报', scope_type: 'month', enabled: 1 },
+      { name: 'quarterly', display_name: '季报', scope_type: 'quarter', enabled: 1 },
     ]
   }
 }
