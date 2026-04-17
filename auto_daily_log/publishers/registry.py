@@ -6,6 +6,7 @@ reports that don't get pushed anywhere).
 """
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from ..models.database import Database
@@ -19,7 +20,7 @@ async def get_publisher(db: Database, summary_type_name: str) -> Optional[Worklo
     underlying credentials may change between calls (user re-logins).
     """
     row = await db.fetch_one(
-        "SELECT publisher_name FROM summary_types WHERE name = ?",
+        "SELECT publisher_name, publisher_config FROM summary_types WHERE name = ?",
         (summary_type_name,),
     )
     if not row or not row.get("publisher_name"):
@@ -29,19 +30,31 @@ async def get_publisher(db: Database, summary_type_name: str) -> Optional[Worklo
     factory = _FACTORIES.get(name)
     if factory is None:
         return None
-    return await factory(db)
+
+    config = {}
+    try:
+        config = json.loads(row.get("publisher_config") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return await factory(db, config)
 
 
-async def _build_jira(db: Database) -> WorklogPublisher:
+async def _build_jira(db: Database, config: dict) -> WorklogPublisher:
     from ..jira_client.client import build_jira_client_from_db
     from .jira import JiraPublisher
     client = await build_jira_client_from_db(db)
     return JiraPublisher(client)
 
 
+async def _build_webhook(db: Database, config: dict) -> WorklogPublisher:
+    from .webhook import WebhookPublisher
+    return WebhookPublisher(config)
+
+
 # ── Factory map — add new publishers here ──────────────────────────────
+# Each factory receives (db, publisher_config_dict) and returns a publisher.
 _FACTORIES: dict = {
     "jira": _build_jira,
-    # "feishu": _build_feishu,   # Phase 2
-    # "webhook": _build_webhook, # Phase 2
+    "webhook": _build_webhook,
 }

@@ -182,4 +182,15 @@ function Main {
     Show-Next
 }
 
-Main
+try {
+    Main
+} catch {
+    Write-Host ''
+    Write-Fail "Bootstrap failed: $_"
+    Write-Host ''
+} finally {
+    if (-not $env:CI -and -not ([Environment]::GetCommandLineArgs() -contains '-NonInteractive')) {
+        Write-Host 'Press Enter to exit...' -ForegroundColor DarkGray
+        try { [void][Console]::ReadLine() } catch {}
+    }
+}

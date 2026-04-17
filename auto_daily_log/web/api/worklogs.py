@@ -352,9 +352,15 @@ async def _generate_period(db, request, tag, today, start, end):
         from ...summarizer.prompt import DEFAULT_PERIOD_SUMMARY_PROMPT, render_prompt
         period_type_label = {"weekly": "周报", "monthly": "月报", "custom": "阶段性总结"}[tag]
 
-        # Try custom prompt from settings first
-        setting = await db.fetch_one("SELECT value FROM settings WHERE key = 'period_summary_prompt'")
-        template = setting["value"] if setting else DEFAULT_PERIOD_SUMMARY_PROMPT
+        # Prompt resolution: per-type template → global setting → hardcoded default
+        type_row = await db.fetch_one(
+            "SELECT prompt_template FROM summary_types WHERE name = ?", (tag,)
+        )
+        if type_row and type_row.get("prompt_template") and type_row["prompt_template"].strip():
+            template = type_row["prompt_template"]
+        else:
+            setting = await db.fetch_one("SELECT value FROM settings WHERE key = 'period_summary_prompt'")
+            template = (setting["value"] if setting and setting["value"] else DEFAULT_PERIOD_SUMMARY_PROMPT)
 
         prompt = render_prompt(
             template,

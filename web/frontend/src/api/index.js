@@ -67,6 +67,11 @@ export default {
     if (sourceType) params.source_type = sourceType
     return api.get('/search', { params })
   },
+  // Summary types CRUD
+  getSummaryTypes: () => api.get('/summary-types'),
+  createSummaryType: (data) => api.post('/summary-types', data),
+  updateSummaryType: (name, data) => api.put(`/summary-types/${name}`, data),
+  deleteSummaryType: (name) => api.delete(`/summary-types/${name}`),
   // Self-update endpoints — driven by the Settings → 自动更新 tab
   // and the global "new version available" banner in App.vue.
   checkForUpdate: (force = false) => api.get('/updates/check', { params: { force } }),

@@ -513,4 +513,26 @@ function Main {
     Show-Summary
 }
 
-Main
+# Wrap in try/catch so the PowerShell window doesn't vanish on error.
+# Without this, $ErrorActionPreference='Stop' + any exception causes an
+# immediate exit — the user sees the window close with no message.
+try {
+    Main
+} catch {
+    Write-Host ''
+    Write-Fail "Installation failed: $_"
+    Write-Host ''
+    Write-Host '  Check the error above and retry. Common fixes:' -ForegroundColor Yellow
+    Write-Host '    - Run as Administrator if permission errors occur'
+    Write-Host '    - Ensure Python 3.9+ is installed and on PATH'
+    Write-Host '    - Ensure Git is installed (winget install Git.Git)'
+    Write-Host ''
+} finally {
+    # Keep the window open so the user can read output.
+    # Only pause when running in a transient window (double-click .ps1);
+    # skip in CI or when called from an existing terminal with -NonInteractive.
+    if (-not $env:CI -and -not ([Environment]::GetCommandLineArgs() -contains '-NonInteractive')) {
+        Write-Host 'Press Enter to exit...' -ForegroundColor DarkGray
+        try { [void][Console]::ReadLine() } catch {}
+    }
+}

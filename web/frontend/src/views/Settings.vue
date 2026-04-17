@@ -487,6 +487,120 @@
       </div>
     </div>
 
+    <!-- Summary Types Tab -->
+    <div v-show="activeTab === 'summary-types'" class="tab-content">
+      <div class="settings-card">
+        <h3 class="card-title">总结类型管理</h3>
+        <p class="card-description">
+          每种总结类型决定了数据范围、审批方式、推送平台和 Prompt 模板。内置类型可修改配置但不能删除。
+        </p>
+
+        <el-table :data="stTypes" style="width: 100%">
+          <el-table-column prop="display_name" label="类型" width="140">
+            <template #default="{ row }">
+              {{ row.display_name }}
+              <el-tag v-if="row.is_builtin" size="small" type="info" style="margin-left: 4px">内置</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="范围" width="100">
+            <template #default="{ row }">{{ scopeLabel(row.scope_rule) }}</template>
+          </el-table-column>
+          <el-table-column label="审批" width="80">
+            <template #default="{ row }">{{ row.review_mode === 'auto' ? '自动' : '手动' }}</template>
+          </el-table-column>
+          <el-table-column label="推送" width="120">
+            <template #default="{ row }">
+              <span v-if="row.publisher_name" class="cell-mono">{{ row.publisher_name }}</span>
+              <span v-else style="color:#999">无</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="Prompt" min-width="120">
+            <template #default="{ row }">
+              <span v-if="row.prompt_template" style="color:#52c41a">自定义</span>
+              <span v-else style="color:#999">全局默认</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="180">
+            <template #default="{ row }">
+              <el-button size="small" round @click="editSummaryType(row)">编辑</el-button>
+              <el-popconfirm
+                v-if="!row.is_builtin"
+                :title="`删除「${row.display_name}」？已有的日志记录不受影响。`"
+                confirm-button-text="删除"
+                cancel-button-text="取消"
+                :width="280"
+                @confirm="deleteSummaryType(row.name)"
+              >
+                <template #reference>
+                  <el-button size="small" round class="danger-btn">删除</el-button>
+                </template>
+              </el-popconfirm>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div style="margin-top: 16px">
+          <el-button round @click="showAddTypeDialog = true">+ 新增总结类型</el-button>
+        </div>
+      </div>
+
+      <!-- Add / Edit dialog -->
+      <el-dialog
+        v-model="stDialogVisible"
+        :title="stEditMode ? '编辑总结类型' : '新增总结类型'"
+        width="560px"
+        :close-on-click-modal="false"
+      >
+        <el-form label-position="top" class="settings-form">
+          <el-form-item v-if="!stEditMode" label="标识名（唯一，英文）">
+            <el-input v-model="stForm.name" placeholder="e.g. sprint-review" :disabled="stEditMode" />
+          </el-form-item>
+          <el-form-item label="显示名称">
+            <el-input v-model="stForm.display_name" placeholder="e.g. Sprint 回顾" />
+          </el-form-item>
+          <el-form-item label="数据范围">
+            <el-select v-model="stForm.scope_type" style="width: 100%">
+              <el-option label="按天" value="day" />
+              <el-option label="按周" value="week" />
+              <el-option label="按月" value="month" />
+              <el-option label="按 Issue" value="issue_based" />
+              <el-option label="自定义天数" value="custom_days" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="审批方式">
+            <el-select v-model="stForm.review_mode" style="width: 100%">
+              <el-option label="自动审批" value="auto" />
+              <el-option label="手动审批" value="manual" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="推送平台">
+            <el-select v-model="stForm.publisher_name" style="width: 100%" clearable placeholder="不推送">
+              <el-option label="Jira" value="jira" />
+              <el-option label="Webhook（企微/飞书/Slack/自定义）" value="webhook" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="stForm.publisher_name === 'webhook'" label="Webhook URL">
+            <el-input v-model="stForm.webhook_url" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+          </el-form-item>
+          <el-form-item v-if="stForm.publisher_name === 'webhook'" label="消息格式">
+            <el-select v-model="stForm.webhook_format" style="width: 100%">
+              <el-option label="通用 JSON" value="generic" />
+              <el-option label="企业微信" value="wecom" />
+              <el-option label="飞书" value="feishu" />
+              <el-option label="Slack" value="slack" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Prompt 模板（留空使用全局默认）">
+            <el-input v-model="stForm.prompt_template" type="textarea" :rows="5" placeholder="留空则使用 Settings → Prompt 模板 的全局配置" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button round @click="stDialogVisible = false">取消</el-button>
+          <el-button type="primary" round @click="saveSummaryType">{{ stEditMode ? '保存' : '创建' }}</el-button>
+        </template>
+      </el-dialog>
+    </div>
+
     <!-- Updates Tab -->
     <div v-show="activeTab === 'updates'" class="tab-content">
       <div class="settings-card">
@@ -624,7 +738,9 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Delete } from '@element-plus/icons-vue'
 import api from '../api'
 
-const activeTab = ref('profile')
+// Support ?tab= query param so other pages can deep-link to a tab
+const _urlTab = new URLSearchParams(window.location.search).get('tab')
+const activeTab = ref(_urlTab || 'profile')
 const tabs = [
   { name: 'profile', label: '个人资料' },
   { name: 'monitor', label: '活动采集' },
@@ -635,6 +751,7 @@ const tabs = [
   { name: 'scheduler', label: '定时任务' },
   { name: 'collectors', label: '数据采集节点' },
   { name: 'recycle', label: '回收站' },
+  { name: 'summary-types', label: '总结类型' },
   { name: 'updates', label: '自动更新' },
 ]
 
@@ -660,6 +777,112 @@ const settings = ref({
 })
 const recycledItems = ref([])
 const collectors = ref([])
+
+// ─── Summary Types state ──────────────────────────────────────────────
+const stTypes = ref([])
+const stDialogVisible = ref(false)
+const stEditMode = ref(false)
+const showAddTypeDialog = ref(false)
+const stForm = ref({
+  name: '', display_name: '', scope_type: 'day', review_mode: 'manual',
+  publisher_name: '', webhook_url: '', webhook_format: 'generic',
+  prompt_template: '',
+})
+
+function scopeLabel(raw) {
+  try {
+    const t = JSON.parse(raw || '{}').type
+    return { day: '按天', week: '按周', month: '按月', issue_based: '按 Issue', custom_days: '自定义' }[t] || t
+  } catch { return '—' }
+}
+
+async function loadSummaryTypes() {
+  try {
+    const r = await api.getSummaryTypes()
+    stTypes.value = r.data
+  } catch { stTypes.value = [] }
+}
+
+function editSummaryType(row) {
+  stEditMode.value = true
+  const pubCfg = (() => { try { return JSON.parse(row.publisher_config || '{}') } catch { return {} } })()
+  stForm.value = {
+    name: row.name,
+    display_name: row.display_name,
+    scope_type: (() => { try { return JSON.parse(row.scope_rule || '{}').type || 'day' } catch { return 'day' } })(),
+    review_mode: row.review_mode || 'manual',
+    publisher_name: row.publisher_name || '',
+    webhook_url: pubCfg.url || '',
+    webhook_format: pubCfg.format || 'generic',
+    prompt_template: row.prompt_template || '',
+  }
+  stDialogVisible.value = true
+}
+
+// Watch showAddTypeDialog to open the dialog in create mode
+import { watch } from 'vue'
+watch(showAddTypeDialog, (v) => {
+  if (v) {
+    stEditMode.value = false
+    stForm.value = {
+      name: '', display_name: '', scope_type: 'day', review_mode: 'manual',
+      publisher_name: '', webhook_url: '', webhook_format: 'generic',
+      prompt_template: '',
+    }
+    stDialogVisible.value = true
+    showAddTypeDialog.value = false
+  }
+})
+
+async function saveSummaryType() {
+  const f = stForm.value
+  const scopeRule = JSON.stringify({ type: f.scope_type })
+  const publisherConfig = f.publisher_name === 'webhook'
+    ? JSON.stringify({ url: f.webhook_url, format: f.webhook_format })
+    : '{}'
+  try {
+    if (stEditMode.value) {
+      await api.updateSummaryType(f.name, {
+        display_name: f.display_name,
+        scope_rule: scopeRule,
+        review_mode: f.review_mode,
+        publisher_name: f.publisher_name || null,
+        publisher_config: publisherConfig,
+        prompt_template: f.prompt_template || '',
+      })
+      ElMessage.success(`已更新「${f.display_name}」`)
+    } else {
+      if (!f.name || !f.display_name) {
+        ElMessage.warning('请填写标识名和显示名称')
+        return
+      }
+      await api.createSummaryType({
+        name: f.name,
+        display_name: f.display_name,
+        scope_rule: scopeRule,
+        review_mode: f.review_mode,
+        publisher_name: f.publisher_name || null,
+        publisher_config: publisherConfig,
+        prompt_template: f.prompt_template || null,
+      })
+      ElMessage.success(`已创建「${f.display_name}」`)
+    }
+    stDialogVisible.value = false
+    await loadSummaryTypes()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '操作失败')
+  }
+}
+
+async function deleteSummaryType(name) {
+  try {
+    await api.deleteSummaryType(name)
+    ElMessage.success('已删除')
+    await loadSummaryTypes()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.detail || '删除失败')
+  }
+}
 
 // ─── Self-update state ────────────────────────────────────────────────
 const updateInfo = ref({ current: '', latest: '', available: false, wheel_url: '', notes: '' })
@@ -988,6 +1211,7 @@ onMounted(async () => {
   loadGitRepos()
   loadRecycled()
   loadCollectors()
+  loadSummaryTypes()
   // Updates: cached check is cheap; backups list is local file scan.
   checkUpdate(false)
   loadBackups()

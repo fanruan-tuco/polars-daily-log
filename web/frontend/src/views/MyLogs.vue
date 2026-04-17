@@ -7,35 +7,16 @@
         <div class="page-subtitle">{{ headerSubtitle }}</div>
       </div>
       <div class="page-header-right">
-        <el-button round :disabled="generating" @click="generate('daily')">总结当天</el-button>
-        <el-button round :disabled="generating" @click="generate('weekly')">总结这周</el-button>
-        <el-button round :disabled="generating" @click="generate('monthly')">总结当月</el-button>
-        <el-popover trigger="click" :width="300">
-          <template #reference>
-            <el-button round :disabled="generating">自定义</el-button>
-          </template>
-          <div>
-            <p class="popover-hint">选择日期范围</p>
-            <el-date-picker
-              v-model="customRange"
-              type="daterange"
-              value-format="YYYY-MM-DD"
-              start-placeholder="开始日期"
-              end-placeholder="结束日期"
-              class="full-width mb-12"
-            />
-            <el-button
-              type="primary"
-              size="small"
-              round
-              :disabled="!customRange || customRange.length < 2 || generating"
-              @click="generateCustom"
-              class="full-width"
-            >
-              生成总结
-            </el-button>
-          </div>
-        </el-popover>
+        <el-button
+          v-for="st in enabledSummaryTypes"
+          :key="st.name"
+          round
+          :disabled="generating"
+          @click="generate(st.name)"
+        >{{ st.display_name }}</el-button>
+        <router-link to="/settings?tab=summary-types" class="add-type-link" title="管理总结类型">
+          <el-button round size="small">+</el-button>
+        </router-link>
       </div>
     </div>
 
@@ -77,7 +58,7 @@
         </div>
       </div>
       <el-date-picker
-        v-if="!isToday && (activeTag === '' || activeTag === 'daily' || activeTag === 'custom')"
+        v-if="!isToday && showDatePicker"
         v-model="selectedDate"
         type="date"
         value-format="YYYY-MM-DD"
@@ -353,7 +334,7 @@ const fullEditText = ref('')
 const auditVisible = ref(false)
 const auditLogs = ref([])
 const activeTag = ref('')
-const customRange = ref(null)
+const customRange = ref(null) // legacy — kept for backward compat if needed
 const generating = ref(false)
 const generatingText = ref('')
 const submittingIssue = ref(null)
@@ -388,14 +369,23 @@ const tagFilters = [
   { label: '自定义', value: 'custom' },
 ]
 
-// "历史" dropdown options (all options except "today")
-const historyFilters = [
+// Summary types loaded from API (replaces hardcoded daily/weekly/monthly)
+const summaryTypes = ref([])
+const enabledSummaryTypes = computed(() => summaryTypes.value.filter(t => t.enabled))
+
+// "历史" dropdown options — built dynamically from summary types
+const historyFilters = computed(() => [
   { label: '全部', value: '' },
-  { label: '每日', value: 'daily' },
-  { label: '每周', value: 'weekly' },
-  { label: '每月', value: 'monthly' },
-  { label: '自定义', value: 'custom' },
-]
+  ...enabledSummaryTypes.value.map(t => ({ label: t.display_name, value: t.name })),
+])
+
+// Show date picker for day-scoped types and "全部"
+const showDatePicker = computed(() => {
+  if (!activeTag.value) return true  // "全部" shows picker
+  const st = summaryTypes.value.find(t => t.name === activeTag.value)
+  if (!st) return true
+  try { return JSON.parse(st.scope_rule || '{}').type === 'day' } catch { return true }
+})
 
 // "今日" is special: it's the daily draft for today. We track it with
 // a dedicated flag because the tag filter alone ('daily' + today's date)
@@ -425,9 +415,10 @@ function selectToday() {
 function selectHistory(value) {
   isToday.value = false
   historyOpen.value = false
-  // Clear date filter when switching to all/weekly/monthly (inappropriate),
-  // keep it for daily/custom
-  if (value !== 'daily' && value !== 'custom') {
+  // Show date picker only for day-scoped types (and "全部" which includes daily)
+  const st = summaryTypes.value.find(t => t.name === value)
+  const isDayScope = !value || (st && JSON.parse(st.scope_rule || '{}').type === 'day')
+  if (!isDayScope) {
     selectedDate.value = null
   }
   filterByTag(value)
@@ -800,7 +791,21 @@ function formatJiraResponse(raw) {
   }
 }
 
-onMounted(() => { loadJiraContext(); loadDrafts() })
+async function loadSummaryTypes() {
+  try {
+    const r = await api.getSummaryTypes()
+    summaryTypes.value = r.data
+  } catch (e) {
+    // Fallback: hardcoded defaults if API fails (pre-migration DB)
+    summaryTypes.value = [
+      { name: 'daily', display_name: '每日日志', scope_rule: '{"type":"day"}', enabled: 1 },
+      { name: 'weekly', display_name: '周报', scope_rule: '{"type":"week"}', enabled: 1 },
+      { name: 'monthly', display_name: '月报', scope_rule: '{"type":"month"}', enabled: 1 },
+    ]
+  }
+}
+
+onMounted(() => { loadSummaryTypes(); loadJiraContext(); loadDrafts() })
 </script>
 
 <style scoped>

@@ -7,10 +7,14 @@ assert on exit code + generated files + stdout.
 
 Every code path in install.sh that branches on role / platform / tty / mode /
 file-existence is exercised.
+
+Skipped on Windows — install.sh is a bash script; Windows uses install.ps1
+(tested in test_install_ps1.py).
 """
 
 import json
 import os
+import platform
 import shutil
 import stat
 import subprocess
@@ -18,6 +22,12 @@ import textwrap
 from pathlib import Path
 
 import pytest
+
+# Skip entire module on Windows — bash not natively available
+pytestmark = pytest.mark.skipif(
+    platform.system() == "Windows",
+    reason="install.sh tests require bash (macOS/Linux only); Windows uses test_install_ps1.py",
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

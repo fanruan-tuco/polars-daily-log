@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS summary_types (
     display_name TEXT NOT NULL,               -- "每日日志", "周报", ...
     scope_rule TEXT NOT NULL DEFAULT '{}',    -- JSON: {"type":"day"} / {"type":"week"} / {"type":"issue_based","platform":"jira"}
     schedule_rule TEXT,                       -- JSON: {"type":"daily","time":"18:00"} or NULL (manual)
-    prompt_key TEXT DEFAULT 'summarize',      -- which prompt template to use
+    prompt_key TEXT DEFAULT 'summarize',      -- fallback key in global settings table
+    prompt_template TEXT,                     -- per-type custom prompt (overrides prompt_key + global)
     review_mode TEXT DEFAULT 'manual',        -- "auto" | "manual"
     publisher_name TEXT,                      -- "jira" / "feishu" / "webhook" / NULL (no push)
     publisher_config TEXT DEFAULT '{}',       -- JSON: publisher-specific settings
@@ -248,6 +249,12 @@ class Database:
         await self._conn.execute(
             "UPDATE settings SET value='anthropic' WHERE key='llm_engine' AND value='claude'"
         )
+
+        # summary_types: per-type prompt template (Phase 2).
+        st_cols = await self.fetch_all("PRAGMA table_info(summary_types)")
+        st_col_names = {c["name"] for c in st_cols}
+        if "prompt_template" not in st_col_names:
+            await self._conn.execute("ALTER TABLE summary_types ADD COLUMN prompt_template TEXT")
 
         # Seed built-in summary types (idempotent — INSERT OR IGNORE).
         _BUILTIN_TYPES = [

@@ -28,7 +28,8 @@ class WorklogSummarizer:
         self._activity_summarizer = activity_summarizer
 
     async def generate_drafts(
-        self, target_date: str, prompt_template: Optional[str] = None
+        self, target_date: str, prompt_template: Optional[str] = None,
+        *, summary_type: str = "daily",
     ) -> list[dict]:
         # Catch-up: synchronously process any pending activity rows so
         # _compress_activities sees llm_summary values instead of the
@@ -62,7 +63,9 @@ class WorklogSummarizer:
         commits_text = self._format_commits(commits)
 
         # ─── Step 1: full activity summary (raw) ─────────────────────
-        summarize_template = prompt_template or await self._get_template("summarize_prompt", DEFAULT_SUMMARIZE_PROMPT)
+        summarize_template = prompt_template or await self._get_template(
+            "summarize_prompt", DEFAULT_SUMMARIZE_PROMPT, summary_type=summary_type,
+        )
         summarize_prompt = render_prompt(
             summarize_template,
             date=target_date,
@@ -82,7 +85,9 @@ class WorklogSummarizer:
             for i in issues
         ) or "无（将所有工作汇总为一条，issue_key 使用 ALL）"
 
-        refine_template = await self._get_template("auto_approve_prompt", DEFAULT_AUTO_APPROVE_PROMPT)
+        refine_template = await self._get_template(
+            "auto_approve_prompt", DEFAULT_AUTO_APPROVE_PROMPT, summary_type=summary_type,
+        )
         refine_prompt = render_prompt(
             refine_template,
             date=target_date,
@@ -246,10 +251,29 @@ class WorklogSummarizer:
                 pass
         return []
 
-    async def _get_template(self, setting_key: str, default: str) -> str:
+    async def _get_template(
+        self, setting_key: str, default: str, *, summary_type: str | None = None,
+    ) -> str:
+        """Resolve prompt template with 3-level fallback:
+          1. summary_types.prompt_template for the specific type
+          2. settings table global override (key = setting_key)
+          3. hardcoded DEFAULT_*_PROMPT
+        """
+        # Level 1: per-type custom prompt
+        if summary_type:
+            row = await self._db.fetch_one(
+                "SELECT prompt_template FROM summary_types WHERE name = ?",
+                (summary_type,),
+            )
+            if row and row.get("prompt_template") and row["prompt_template"].strip():
+                return row["prompt_template"]
+
+        # Level 2: global settings override
         setting = await self._db.fetch_one(
             "SELECT value FROM settings WHERE key = ?", (setting_key,)
         )
         if setting and setting["value"] and setting["value"].strip():
             return setting["value"]
+
+        # Level 3: hardcoded default
         return default
