@@ -48,7 +48,7 @@ header() { echo -e "\n${BOLD}$1${NC}"; }
 tty_read() {
     local prompt="$1" default="${2:-}"
     if [[ -r /dev/tty ]]; then
-        read -rp "$prompt" REPLY < /dev/tty || REPLY=""
+        read -rp "$prompt" REPLY < /dev/tty 2>/dev/null || REPLY=""
     else
         REPLY=""
     fi

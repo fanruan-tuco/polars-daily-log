@@ -19,6 +19,7 @@ dependencies = [
     "sqlite-vec>=0.1.0",
     "python-multipart>=0.0.20",
     "mcp>=1.0.0",
+    "packaging>=21.0",
 ]
 
 [project.optional-dependencies]
