@@ -438,13 +438,28 @@ async def approve_all(request: Request, date: str = Query(default=None)):
         await db.execute("INSERT INTO audit_logs (draft_id, action) VALUES (?, 'approved')", (d["id"],))
     return {"status": "all_approved", "count": len(drafts)}
 
-async def _get_jira_client(db):
-    """Build JiraClient from settings (thin wrapper that translates to HTTPException)."""
-    from ...jira_client.client import MissingJiraConfig, build_jira_client_from_db
+async def _get_publisher(db, draft_tag: str):
+    """Resolve the WorklogPublisher for a draft's summary type.
+
+    Raises HTTP 400 when:
+      - the summary type has no publisher configured (e.g. weekly/monthly)
+      - Jira (or other platform) credentials are missing
+      - the tag has no matching summary_types row AND no fallback exists
+
+    Pre-migration drafts with tag='daily' work because the built-in seed
+    always creates the 'daily' row. Drafts with tag='custom' that predate
+    the summary_types table will get a 400 — users must re-generate or
+    manually add a 'custom' summary type (Phase 2 UI covers this).
+    """
+    from ...publishers.registry import get_publisher
+    from ...jira_client.client import MissingJiraConfig
     try:
-        return await build_jira_client_from_db(db)
+        publisher = await get_publisher(db, draft_tag)
     except MissingJiraConfig as e:
         raise HTTPException(400, str(e))
+    if publisher is None:
+        raise HTTPException(400, f"总结类型 '{draft_tag}' 没有配置推送平台")
+    return publisher
 
 
 async def _get_started_timestamp(db, draft_date: str) -> str:
@@ -458,8 +473,8 @@ async def _get_started_timestamp(db, draft_date: str) -> str:
 
 
 @router.post("/worklogs/{draft_id}/submit")
-async def submit_to_jira(draft_id: int, request: Request):
-    """Submit ALL issues in a daily record to Jira."""
+async def submit_to_platform(draft_id: int, request: Request):
+    """Submit ALL issues in a draft to the configured platform (Jira, etc.)."""
     db = request.app.state.db
     draft = await db.fetch_one("SELECT * FROM worklog_drafts WHERE id = ?", (draft_id,))
     if not draft:
@@ -467,7 +482,7 @@ async def submit_to_jira(draft_id: int, request: Request):
     if draft["status"] not in ("approved", "auto_approved"):
         raise HTTPException(400, f"Draft status is '{draft['status']}', must be approved first")
 
-    jira = await _get_jira_client(db)
+    publisher = await _get_publisher(db, draft["tag"] or "daily")
     started = await _get_started_timestamp(db, draft['date'])
 
     # Parse issue entries from summary JSON
@@ -484,42 +499,47 @@ async def submit_to_jira(draft_id: int, request: Request):
         if issue["issue_key"] in _SKIP_KEYS:
             results.append({"issue_key": issue["issue_key"], "skipped": True})
             continue
-        try:
-            time_sec = int(issue["time_spent_hours"] * 3600)
-            result = await jira.submit_worklog(
-                issue_key=issue["issue_key"], time_spent_sec=time_sec,
-                comment=issue["summary"], started=started,
-            )
-            issues[i]["jira_worklog_id"] = str(result.get("id", ""))
-            results.append({"issue_key": issue["issue_key"], "jira_worklog_id": issues[i]["jira_worklog_id"]})
-            # One audit row per issue — same shape as the per-issue endpoint
-            # so the timeline UI doesn't need to handle a "batch" special case.
+        time_sec = int(issue["time_spent_hours"] * 3600)
+        pub_result = await publisher.submit(
+            issue_key=issue["issue_key"], time_spent_sec=time_sec,
+            comment=issue["summary"], started=started,
+        )
+        if pub_result.success:
+            issues[i]["jira_worklog_id"] = pub_result.worklog_id
+            results.append({"issue_key": issue["issue_key"], "jira_worklog_id": pub_result.worklog_id})
             await db.execute(
                 "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
                 "VALUES (?, 'submitted_issue', ?, ?, ?, 'manual_all')",
-                (draft_id, json.dumps({"issue_key": issue["issue_key"], "result": result}, ensure_ascii=False),
+                (draft_id, json.dumps({"issue_key": issue["issue_key"], "result": pub_result.raw}, ensure_ascii=False),
                  i, issue["issue_key"]),
             )
-        except Exception as e:
-            results.append({"issue_key": issue["issue_key"], "error": str(e)})
+        else:
+            results.append({"issue_key": issue["issue_key"], "error": pub_result.error})
             await db.execute(
                 "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
                 "VALUES (?, 'submit_failed_issue', ?, ?, ?, 'manual_all')",
-                (draft_id, json.dumps({"issue_key": issue["issue_key"], "error": str(e)}, ensure_ascii=False),
+                (draft_id, json.dumps({"issue_key": issue["issue_key"], "error": pub_result.error}, ensure_ascii=False),
                  i, issue["issue_key"]),
             )
 
-    # Update summary with jira_worklog_ids
-    await db.execute(
-        "UPDATE worklog_drafts SET summary = ?, status = 'submitted', updated_at = datetime('now') WHERE id = ?",
-        (json.dumps(issues, ensure_ascii=False), draft_id),
+    # Only mark as 'submitted' if every non-skipped issue got a worklog ID;
+    # otherwise keep the draft open for retry (mirrors scheduler logic).
+    _SKIP_KEYS_SET = _SKIP_KEYS
+    all_done = all(
+        iss.get("jira_worklog_id") or iss["issue_key"] in _SKIP_KEYS_SET
+        for iss in issues
     )
-    return {"status": "submitted", "results": results}
+    new_status = "submitted" if all_done else draft["status"]
+    await db.execute(
+        "UPDATE worklog_drafts SET summary = ?, status = ?, updated_at = datetime('now') WHERE id = ?",
+        (json.dumps(issues, ensure_ascii=False), new_status, draft_id),
+    )
+    return {"status": new_status, "results": results}
 
 
 @router.post("/worklogs/{draft_id}/submit-issue/{issue_index}")
 async def submit_single_issue(draft_id: int, issue_index: int, request: Request):
-    """Submit a single issue from a daily record to Jira."""
+    """Submit a single issue from a draft to the configured platform."""
     db = request.app.state.db
     draft = await db.fetch_one("SELECT * FROM worklog_drafts WHERE id = ?", (draft_id,))
     if not draft:
@@ -539,18 +559,17 @@ async def submit_single_issue(draft_id: int, issue_index: int, request: Request)
     if issue.get("jira_worklog_id"):
         raise HTTPException(400, f"Issue {issue['issue_key']} already submitted")
 
-    jira = await _get_jira_client(db)
+    publisher = await _get_publisher(db, draft["tag"] or "daily")
     started = await _get_started_timestamp(db, draft['date'])
 
-    try:
-        time_sec = int(issue["time_spent_hours"] * 3600)
-        result = await jira.submit_worklog(
-            issue_key=issue["issue_key"], time_spent_sec=time_sec,
-            comment=issue["summary"], started=started,
-        )
-        issues[issue_index]["jira_worklog_id"] = str(result.get("id", ""))
-    except Exception as e:
-        raise HTTPException(502, f"Jira API error: {str(e)}")
+    time_sec = int(issue["time_spent_hours"] * 3600)
+    pub_result = await publisher.submit(
+        issue_key=issue["issue_key"], time_spent_sec=time_sec,
+        comment=issue["summary"], started=started,
+    )
+    if not pub_result.success:
+        raise HTTPException(502, f"Publish error: {pub_result.error}")
+    issues[issue_index]["jira_worklog_id"] = pub_result.worklog_id
 
     # Check if all issues are submitted → mark whole draft as submitted
     all_submitted = all(iss.get("jira_worklog_id") for iss in issues)
@@ -564,7 +583,7 @@ async def submit_single_issue(draft_id: int, issue_index: int, request: Request)
         "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
         "VALUES (?, 'submitted_issue', ?, ?, ?, 'manual_single')",
         (draft_id,
-         json.dumps({"issue_key": issue["issue_key"], "result": result}, ensure_ascii=False),
+         json.dumps({"issue_key": issue["issue_key"], "result": pub_result.raw}, ensure_ascii=False),
          issue_index, issue["issue_key"]),
     )
     return {"status": "submitted", "issue_key": issue["issue_key"], "jira_worklog_id": issues[issue_index]["jira_worklog_id"], "all_submitted": all_submitted}

@@ -58,8 +58,20 @@ async def _seed_approved_two_issue_draft(db: Database, *, date: str = "2026-04-1
     return draft_id
 
 
+def _mock_publisher(returned_id: str = "12345"):
+    """A WorklogPublisher stub that returns success with a fake worklog id."""
+    from auto_daily_log.publishers import PublishResult
+    pub = AsyncMock()
+    pub.name = "jira"
+    pub.submit = AsyncMock(return_value=PublishResult(
+        success=True, worklog_id=returned_id, platform="jira",
+        raw={"id": returned_id, "self": f"https://jira.test/rest/api/2/worklog/{returned_id}"},
+    ))
+    return pub
+
+
 def _mock_jira(returned_id: str = "12345"):
-    """A JiraClient stub whose submit_worklog returns a fake worklog id."""
+    """A JiraClient stub for scheduler path (uses build_jira_client_from_db)."""
     jira = AsyncMock()
     jira.submit_worklog = AsyncMock(return_value={
         "id": returned_id,
@@ -77,19 +89,18 @@ async def test_mixed_manual_then_auto_writes_one_row_per_issue(env):
     draft_id = await _seed_approved_two_issue_draft(db)
 
     # Step 1: user manually submits the FIRST issue from the UI.
-    with patch("auto_daily_log.web.api.worklogs._get_jira_client",
-               new=AsyncMock(return_value=_mock_jira("manual-1"))), \
+    with patch("auto_daily_log.web.api.worklogs._get_publisher",
+               new=AsyncMock(return_value=_mock_publisher("manual-1"))), \
          patch("auto_daily_log.web.api.worklogs._get_started_timestamp",
                new=AsyncMock(return_value="2026-04-12T21:00:00.000+0800")):
         r = await client.post(f"/api/worklogs/{draft_id}/submit-issue/0")
     assert r.status_code == 200
 
     # Step 2: scheduler runs that night and picks up the remaining issue.
-    auto_jira = _mock_jira("auto-2")
-    with patch("auto_daily_log.jira_client.client.build_jira_client_from_db",
-               new=AsyncMock(return_value=auto_jira)):
+    auto_pub = _mock_publisher("auto-2")
+    with patch("auto_daily_log.publishers.registry.get_publisher",
+               new=AsyncMock(return_value=auto_pub)):
         wf = DailyWorkflow(db, MagicMock(), AutoApproveConfig(enabled=True, trigger_time="21:30"))
-        # Move draft into the auto path's filter (date + status='approved' both qualify).
         await wf._submit_approved("2026-04-12")
 
     # ── Assertions ────────────────────────────────────────────────────
@@ -112,9 +123,9 @@ async def test_mixed_manual_then_auto_writes_one_row_per_issue(env):
     final = await db.fetch_one("SELECT status FROM worklog_drafts WHERE id = ?", (draft_id,))
     assert final["status"] == "submitted"
 
-    # Both Jira clients were each called exactly once with the right key.
-    assert auto_jira.submit_worklog.await_count == 1
-    auto_call = auto_jira.submit_worklog.await_args
+    # Publisher was called once for the remaining issue.
+    assert auto_pub.submit.await_count == 1
+    auto_call = auto_pub.submit.await_args
     assert auto_call.kwargs["issue_key"] == "PROJ-101"
 
 
@@ -125,8 +136,8 @@ async def test_manual_submit_all_writes_one_row_per_issue(env):
     client, db = env
     draft_id = await _seed_approved_two_issue_draft(db)
 
-    with patch("auto_daily_log.web.api.worklogs._get_jira_client",
-               new=AsyncMock(return_value=_mock_jira("all-x"))), \
+    with patch("auto_daily_log.web.api.worklogs._get_publisher",
+               new=AsyncMock(return_value=_mock_publisher("all-x"))), \
          patch("auto_daily_log.web.api.worklogs._get_started_timestamp",
                new=AsyncMock(return_value="2026-04-12T21:00:00.000+0800")):
         r = await client.post(f"/api/worklogs/{draft_id}/submit")
@@ -148,19 +159,21 @@ async def test_manual_submit_all_writes_one_row_per_issue(env):
 @pytest.mark.asyncio
 async def test_auto_submit_isolates_failure_to_one_issue(env):
     """If issue 0 fails to submit, issue 1 should still be attempted."""
+    from auto_daily_log.publishers import PublishResult
     _client, db = env
     draft_id = await _seed_approved_two_issue_draft(db)
 
-    fail_then_ok = AsyncMock()
     call_count = {"n": 0}
-    async def _maybe_fail(issue_key, **kw):
+    fail_then_ok = AsyncMock()
+    fail_then_ok.name = "jira"
+    async def _maybe_fail(*, issue_key, time_spent_sec, comment, started):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            raise RuntimeError("Jira returned 502")
-        return {"id": "ok-2"}
-    fail_then_ok.submit_worklog = _maybe_fail
+            return PublishResult(success=False, platform="jira", error="Jira returned 502")
+        return PublishResult(success=True, worklog_id="ok-2", platform="jira", raw={"id": "ok-2"})
+    fail_then_ok.submit = _maybe_fail
 
-    with patch("auto_daily_log.jira_client.client.build_jira_client_from_db",
+    with patch("auto_daily_log.publishers.registry.get_publisher",
                new=AsyncMock(return_value=fail_then_ok)):
         wf = DailyWorkflow(db, MagicMock(), AutoApproveConfig(enabled=True, trigger_time="21:30"))
         await wf._submit_approved("2026-04-12")

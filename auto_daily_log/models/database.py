@@ -105,6 +105,20 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, id);
 
+CREATE TABLE IF NOT EXISTS summary_types (
+    name TEXT PRIMARY KEY,                    -- "daily", "weekly", "sprint-review", ...
+    display_name TEXT NOT NULL,               -- "每日日志", "周报", ...
+    scope_rule TEXT NOT NULL DEFAULT '{}',    -- JSON: {"type":"day"} / {"type":"week"} / {"type":"issue_based","platform":"jira"}
+    schedule_rule TEXT,                       -- JSON: {"type":"daily","time":"18:00"} or NULL (manual)
+    prompt_key TEXT DEFAULT 'summarize',      -- which prompt template to use
+    review_mode TEXT DEFAULT 'manual',        -- "auto" | "manual"
+    publisher_name TEXT,                      -- "jira" / "feishu" / "webhook" / NULL (no push)
+    publisher_config TEXT DEFAULT '{}',       -- JSON: publisher-specific settings
+    is_builtin INTEGER DEFAULT 0,            -- 1 = cannot delete, config editable
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS collectors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     machine_id TEXT UNIQUE NOT NULL,
@@ -234,6 +248,24 @@ class Database:
         await self._conn.execute(
             "UPDATE settings SET value='anthropic' WHERE key='llm_engine' AND value='claude'"
         )
+
+        # Seed built-in summary types (idempotent — INSERT OR IGNORE).
+        _BUILTIN_TYPES = [
+            ("daily",   "每日日志", '{"type":"day"}',
+             '{"type":"daily","time":"18:00"}', "summarize", "auto", "jira", "{}"),
+            ("weekly",  "周报",     '{"type":"week"}',
+             None, "period_summary", "manual", None, "{}"),
+            ("monthly", "月报",     '{"type":"month"}',
+             None, "period_summary", "manual", None, "{}"),
+        ]
+        for name, disp, scope, sched, prompt, review, pub, pub_cfg in _BUILTIN_TYPES:
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO summary_types "
+                "(name, display_name, scope_rule, schedule_rule, prompt_key, "
+                "review_mode, publisher_name, publisher_config, is_builtin) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                (name, disp, scope, sched, prompt, review, pub, pub_cfg),
+            )
 
         await self._conn.commit()
 
