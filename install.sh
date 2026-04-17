@@ -88,12 +88,12 @@ resolve_role() {
         *) fail "Unknown PDL_ROLE: $ROLE (must be server/collector/both/ask)"; exit 1 ;;
     esac
 
-    [[ "$ROLE" == "server"    || "$ROLE" == "both" ]] && INSTALL_SERVER=1
-    [[ "$ROLE" == "collector" || "$ROLE" == "both" ]] && INSTALL_COLLECTOR=1
+    if [[ "$ROLE" == "server" || "$ROLE" == "both" ]]; then INSTALL_SERVER=1; fi
+    if [[ "$ROLE" == "collector" || "$ROLE" == "both" ]]; then INSTALL_COLLECTOR=1; fi
 
     local summary=""
-    (( INSTALL_SERVER    )) && summary+="server "
-    (( INSTALL_COLLECTOR )) && summary+="collector"
+    if (( INSTALL_SERVER )); then summary+="server "; fi
+    if (( INSTALL_COLLECTOR )); then summary+="collector"; fi
     info "Will install: $summary"
 }
 
