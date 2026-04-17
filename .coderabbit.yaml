@@ -1,0 +1,73 @@
+language: zh-CN
+tone_instructions: |
+  用中文 review，直接指出问题，不用套话。项目是个人工具（单用户多设备），
+  不是团队协作软件——审查时不要出现"team lead / 多租户 / 共享看板"概念。
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  changed_files_summary: true
+  sequence_diagrams: false
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - master
+
+  path_instructions:
+    - path: "auto_daily_log/**/*.py"
+      instructions: |
+        遵守 AGENTS.md 的「原汁原味记录」原则：
+        - Monitor 采集 / SUMMARIZE_PROMPT 不做筛选，只如实记录
+        - 需要筛过的数据在下游 prompt 里做，不要回头改采集层
+        - 软删除走回收站，不要直接硬删
+        测试规范：
+        - 必须用精确断言 (assert x == 'expected')
+        - 严禁 assert x / assert len(x) > 0 之类笼统断言
+        Jira 兼容：
+        - 构造 JiraClient 唯一入口是 build_jira_client_from_db + JiraClient.submit_worklog
+        - 不要绕开 _build_worklog_payload 直接 HTTP POST（会踩 4-byte UTF-8 bug）
+
+    - path: "auto_daily_log_collector/**/*.py"
+      instructions: |
+        跨平台两层结构：
+        - 底层 auto_daily_log/monitor/ 实现 PlatformAPI（raw OS API 封装）
+        - Adapter 层 auto_daily_log_collector/platforms/ 实现 PlatformAdapter + 向 factory.py 注册
+        加新平台必须两层一起动，不能只改一层。
+
+    - path: "web/frontend/src/**/*.vue"
+      instructions: |
+        UI 一致性：
+        - 破坏性操作用 class="danger-btn"（软色调），不可逆用 danger-btn-strong
+        - 确认弹窗用 el-popconfirm，Toast 用 ElMessage（1.5s）
+        - 页面顶部只放一句说明，工具栏放次级位置
+        - 删除走软删除（回收站），硬删除仅限最终清理
+
+    - path: "tests/**/*.py"
+      instructions: |
+        所有断言必须用精确值，严禁 assert x / assert len(x) > 0
+
+    - path: "auto_daily_log/summarizer/prompt.py"
+      instructions: |
+        每日总结 prompt（SUMMARIZE_PROMPT）偏保守，记录为主，不要帮用户筛选。
+        下游用途的 prompt（AUTO_APPROVE / PERIOD_SUMMARY）才做筛选。
+
+  tools:
+    ruff:
+      enabled: true
+    markdownlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+
+chat:
+  auto_reply: true

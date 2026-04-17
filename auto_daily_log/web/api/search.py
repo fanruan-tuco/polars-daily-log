@@ -16,6 +16,13 @@ async def _get_searcher(request) -> Searcher:
     base_url = (await db.fetch_one("SELECT value FROM settings WHERE key = 'llm_base_url'") or {}).get("value", "")
 
     if not api_key:
+        from ...builtin_llm import load_builtin_llm_config
+        builtin = load_builtin_llm_config()
+        if builtin:
+            api_key = builtin.get("api_key", "")
+            base_url = base_url or builtin.get("base_url", "")
+
+    if not api_key:
         raise HTTPException(503, "Search unavailable — LLM API Key not configured in Settings")
 
     # Embedding uses OpenAI-compatible /v1/embeddings

@@ -18,6 +18,10 @@ auto_daily_log/frontend_dist/
 
 # Collector real config (example is committed; actual user config is not)
 collector.yaml
+# Plaintext built-in LLM config. Only .example is committed; the real file
+# stays local. The encrypted blob (auto_daily_log/builtin_llm.enc) IS committed.
+.secrets/*
+!.secrets/*.example
 # IDE
 .idea/
 .vscode/

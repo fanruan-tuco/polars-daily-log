@@ -1,11 +1,22 @@
 """Protocol tests — engine → 3 canonical protocols (openai_compat / anthropic / ollama)."""
 import pytest
+from unittest.mock import patch
 
 from auto_daily_log.summarizer.engine import VALID_PROTOCOLS, get_llm_engine
 from auto_daily_log.summarizer.openai_compat import OpenAICompatEngine
 from auto_daily_log.summarizer.claude_engine import ClaudeEngine
 from auto_daily_log.summarizer.ollama import OllamaEngine
 from auto_daily_log.config import LLMConfig, LLMProviderConfig
+
+# Deterministic builtin config for CI — the real builtin.key only exists
+# on the author's machine. Tests mock load_builtin_llm_config to return
+# this so the fallback path is exercised without a real key file.
+_FAKE_BUILTIN = {
+    "engine": "openai_compat",
+    "api_key": "sk-kimi-test-builtin-key",
+    "model": "moonshot-v1-8k",
+    "base_url": "https://api.moonshot.cn/v1",
+}
 
 
 class TestValidProtocols:
@@ -147,11 +158,12 @@ class TestBuiltinKimiFallback:
 
         db = Database(tmp_path / "t.db", embedding_dimensions=128)
         await db.initialize()
-        engine = await _get_llm_engine_from_settings(db)
+        with patch("auto_daily_log.builtin_llm.load_builtin_llm_config", return_value=_FAKE_BUILTIN):
+            engine = await _get_llm_engine_from_settings(db)
         assert isinstance(engine, OpenAICompatEngine)
         assert engine._config.model == "moonshot-v1-8k"
         assert engine._config.base_url == "https://api.moonshot.cn/v1"
-        assert engine._config.api_key.startswith("sk-kimi-")
+        assert engine._config.api_key == "sk-kimi-test-builtin-key"
         await db.close()
 
     @pytest.mark.asyncio
@@ -163,7 +175,8 @@ class TestBuiltinKimiFallback:
         await db.initialize()
         await db.execute("INSERT INTO settings (key, value) VALUES ('llm_api_key', 'sk-user-own-key')")
         await db.execute("INSERT INTO settings (key, value) VALUES ('llm_engine', 'openai_compat')")
-        engine = await _get_llm_engine_from_settings(db)
+        with patch("auto_daily_log.builtin_llm.load_builtin_llm_config", return_value=_FAKE_BUILTIN):
+            engine = await _get_llm_engine_from_settings(db)
         assert engine._config.api_key == "sk-user-own-key"
         await db.close()
 

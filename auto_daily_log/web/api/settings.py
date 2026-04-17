@@ -1,9 +1,44 @@
 from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
+from pathlib import Path
 import httpx
 
 router = APIRouter(tags=["settings"])
+
+
+def _save_jira_avatar(user: dict, cookie: str, data_dir: Path) -> Optional[str]:
+    """Download Jira avatar (48x48) to local file using stored cookie.
+
+    Returns the absolute file path on success, or None if there was no avatar
+    URL / the download failed. Called from jira-status + jira-login flows.
+    """
+    import subprocess, os
+    try:
+        avatar_url = (user.get("avatarUrls") or {}).get("48x48")
+        if not avatar_url or not cookie:
+            return None
+        data_dir.mkdir(parents=True, exist_ok=True)
+        target = data_dir / "jira_avatar.png"
+        clean_env = {**os.environ, "http_proxy": "", "https_proxy": "", "all_proxy": "", "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": ""}
+        result = subprocess.run(
+            ["curl", "-sL", "--noproxy", "*", "-b", cookie, "-o", str(target), avatar_url],
+            capture_output=True, timeout=10, env=clean_env,
+        )
+        if result.returncode != 0 or not target.exists() or target.stat().st_size == 0:
+            return None
+        return str(target)
+    except Exception:
+        return None
+
+
+async def _upsert_setting(db, key: str, value: str) -> None:
+    existing = await db.fetch_one("SELECT key FROM settings WHERE key = ?", (key,))
+    if existing:
+        await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = ?", (value, key))
+    else:
+        await db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
 
 class SettingUpdate(BaseModel):
     value: str
@@ -108,11 +143,15 @@ async def jira_sso_login(body: JiraLoginRequest, request: Request):
             ("jira_auth_mode", "cookie"),
             ("jira_cookie", cookie_str),
         ]:
-            existing = await db.fetch_one("SELECT key FROM settings WHERE key = ?", (key,))
-            if existing:
-                await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = ?", (value, key))
-            else:
-                await db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
+            await _upsert_setting(db, key, value)
+
+        # Step 4b: Cache avatar locally so we don't hit Jira on every page load.
+        if user:
+            config = getattr(request.app.state, "config", None)
+            data_dir = config.system.resolved_data_dir if config else Path.home() / ".auto_daily_log"
+            avatar_path = _save_jira_avatar(user, cookie_str, data_dir)
+            if avatar_path:
+                await _upsert_setting(db, "jira_avatar_path", avatar_path)
 
         debug_info = " | ".join(debug_hops)
         if user:
@@ -238,11 +277,15 @@ async def jira_status(request: Request):
             user = _json.loads(result.stdout)
             username = user.get("displayName", user.get("name"))
             if username and username != cached_user:
-                existing = await db.fetch_one("SELECT key FROM settings WHERE key = 'jira_username'")
-                if existing:
-                    await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'jira_username'", (username,))
-                else:
-                    await db.execute("INSERT INTO settings (key, value) VALUES ('jira_username', ?)", (username,))
+                await _upsert_setting(db, "jira_username", username)
+            # Refresh avatar only when missing — Jira avatars rarely change.
+            existing_avatar = (await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_avatar_path'") or {}).get("value", "")
+            if not existing_avatar or not Path(existing_avatar).exists():
+                config = getattr(request.app.state, "config", None)
+                data_dir = config.system.resolved_data_dir if config else Path.home() / ".auto_daily_log"
+                avatar_path = _save_jira_avatar(user, cookie, data_dir)
+                if avatar_path:
+                    await _upsert_setting(db, "jira_avatar_path", avatar_path)
             return {"logged_in": True, "username": username}
     except Exception:
         pass
@@ -310,11 +353,7 @@ async def do_jira_login_get(request: Request, mobile: str = Query(""), password:
 
     if len(relevant) >= 2:
         for key, value in [("jira_server_url", jira_url.rstrip("/")), ("jira_auth_mode", "cookie"), ("jira_cookie", cookie_str)]:
-            existing = await db.fetch_one("SELECT key FROM settings WHERE key = ?", (key,))
-            if existing:
-                await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = ?", (value, key))
-            else:
-                await db.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, value))
+            await _upsert_setting(db, key, value)
 
     # Get username
     username = None
@@ -328,15 +367,32 @@ async def do_jira_login_get(request: Request, mobile: str = Query(""), password:
                 user = _json.loads(r3.stdout)
                 username = user.get("displayName", user.get("name"))
                 # Save username for nav bar display
-                existing = await db.fetch_one("SELECT key FROM settings WHERE key = 'jira_username'")
-                if existing:
-                    await db.execute("UPDATE settings SET value = ?, updated_at = datetime('now') WHERE key = 'jira_username'", (username,))
-                else:
-                    await db.execute("INSERT INTO settings (key, value) VALUES ('jira_username', ?)", (username,))
+                if username:
+                    await _upsert_setting(db, "jira_username", username)
+                # Cache avatar locally — login implies user may have changed.
+                config = getattr(request.app.state, "config", None)
+                data_dir = config.system.resolved_data_dir if config else Path.home() / ".auto_daily_log"
+                avatar_path = _save_jira_avatar(user, cookie_str, data_dir)
+                if avatar_path:
+                    await _upsert_setting(db, "jira_avatar_path", avatar_path)
         except Exception:
             pass
 
     return {"success": len(relevant) >= 2, "username": username}
+
+
+@router.get("/settings/jira-avatar")
+async def get_jira_avatar(request: Request):
+    """Serve the cached Jira avatar file. Refreshed by jira-status / jira-login."""
+    db = request.app.state.db
+    row = await db.fetch_one("SELECT value FROM settings WHERE key = 'jira_avatar_path'")
+    path = (row or {}).get("value", "")
+    if not path:
+        raise HTTPException(404, "No Jira avatar cached yet")
+    f = Path(path)
+    if not f.exists():
+        raise HTTPException(404, "Jira avatar file missing")
+    return FileResponse(f, media_type="image/png", headers={"Cache-Control": "private, max-age=300"})
 
 
 @router.get("/settings/{key}")
