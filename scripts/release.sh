@@ -113,6 +113,10 @@ cp config.yaml.example collector.yaml.example "$STAGE_DIR/" 2>/dev/null || {
     [[ -f collector.yaml ]] && cp collector.yaml "$STAGE_DIR/collector.yaml.example" || true
 }
 [[ -f README.md ]] && cp README.md "$STAGE_DIR/"
+# Include the encrypted built-in LLM blob so install.sh can prompt for the
+# author's shared passphrase. If it's missing (e.g., the author hasn't run
+# scripts/encrypt-builtin.sh yet), install.sh silently skips the step.
+[[ -f auto_daily_log/builtin_llm.enc ]] && cp auto_daily_log/builtin_llm.enc "$STAGE_DIR/"
 echo "$VERSION" > "$STAGE_DIR/VERSION"
 
 tar czf "$TARBALL" -C "$ROOT_DIR/release" "polars-daily-log-$VERSION"

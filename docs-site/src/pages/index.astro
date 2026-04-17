@@ -77,7 +77,7 @@ const faqs = [
         <a href={`${repoUrl}/blob/master/CHANGELOG.md`} target="_blank" rel="noopener">更新日志</a>
       </nav>
       <a class="nav-cta" href={releaseUrl} target="_blank" rel="noopener">
-        下载 v0.2.0
+        下载 v0.4.0
       </a>
     </div>
   </header>
@@ -120,7 +120,20 @@ const faqs = [
               <span class="install-label">最常见</span>
               <h3>一体机：Server + Collector</h3>
             </div>
-            <pre><code>curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh | bash</code></pre>
+            <div class="install-code">
+              <div class="install-code-bar">
+                <span>安装命令</span>
+                <button
+                  class="install-copy-btn"
+                  type="button"
+                  data-copy-button
+                  data-copy="curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh | bash"
+                >
+                  复制
+                </button>
+              </div>
+              <pre><code>curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh | bash</code></pre>
+            </div>
             <p>自动下载最新 release、解压、执行 <code>install.sh</code>。装完访问 <code>http://127.0.0.1:8888</code>。</p>
           </div>
           <div class="install-card" data-reveal style="--delay: 100ms;">
@@ -128,11 +141,24 @@ const faqs = [
               <span class="install-label">多机汇总</span>
               <h3>其他设备只装 Collector</h3>
             </div>
-            <pre><code>{`curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh \\
+            <div class="install-code">
+              <div class="install-code-bar">
+                <span>安装命令</span>
+                <button
+                  class="install-copy-btn"
+                  type="button"
+                  data-copy-button
+                  data-copy={"curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh \\\n  | PDL_ROLE=collector \\\n    PDL_SERVER_URL=http://你的hub:8888 \\\n    PDL_COLLECTOR_NAME=macbook \\\n    bash"}
+                >
+                  复制
+                </button>
+              </div>
+              <pre><code>{`curl -fsSL https://raw.githubusercontent.com/Conner2077/polars-daily-log/master/bootstrap.sh \\
   | PDL_ROLE=collector \\
     PDL_SERVER_URL=http://你的hub:8888 \\
     PDL_COLLECTOR_NAME=macbook \\
     bash`}</code></pre>
+            </div>
             <p>环境变量非交互装，适合把自己的 MacBook / Linux / 台式机批量推给 hub。</p>
           </div>
         </div>
@@ -377,7 +403,7 @@ const faqs = [
                 <text x="284" y="780" font-family="JetBrains Mono, monospace" font-size="12" fill="#6e6e80">16:55</text>
                 <text x="400" y="780">Terminal</text>
                 <text x="580" y="780" fill="#353740">bash scripts/release.sh</text>
-                <text x="1160" y="780" fill="#6e6e80">打 v0.2.0 release tarball</text>
+                <text x="1160" y="780" fill="#6e6e80">打 v0.4.0 release tarball</text>
                 <text x="1536" y="780" fill="#6e6e80" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="12">mac</text>
 
                 <line x1="284" y1="792" x2="1536" y2="792" stroke="#f3f3f3"/>
@@ -472,7 +498,7 @@ const faqs = [
         </p>
         <div class="hero-cta center">
           <a class="btn btn-primary" href={releaseUrl} target="_blank" rel="noopener">
-            下载 v0.2.0
+            下载 v0.4.0
           </a>
           <a class="btn btn-text" href={`${repoUrl}/blob/master/CHANGELOG.md`} target="_blank" rel="noopener">
             查看更新日志 <span class="arrow" aria-hidden="true">↗</span>
@@ -800,6 +826,7 @@ const faqs = [
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 24px;
+    align-items: stretch;
   }
   .install-card {
     background: var(--bg-card);
@@ -809,6 +836,7 @@ const faqs = [
     display: flex;
     flex-direction: column;
     gap: 20px;
+    min-height: 100%;
     transition-delay: var(--delay, 0ms);
     transition: box-shadow 0.25s ease, transform 0.25s ease;
   }
@@ -840,10 +868,69 @@ const faqs = [
     letter-spacing: -0.015em;
     color: var(--ink);
   }
+  .install-code {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(23, 23, 23, 0.08);
+    border-radius: 16px;
+    background: #111111;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .install-code-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+  }
+  .install-copy-btn {
+    appearance: none;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #f5f5f5;
+    font: inherit;
+    font-weight: 500;
+    line-height: 1;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition:
+      background 0.18s ease,
+      border-color 0.18s ease,
+      transform 0.18s ease,
+      color 0.18s ease;
+  }
+  .install-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+  }
+  .install-copy-btn:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.78);
+    outline-offset: 2px;
+  }
+  .install-copy-btn[data-copied="true"] {
+    background: rgba(101, 218, 149, 0.14);
+    border-color: rgba(101, 218, 149, 0.42);
+    color: #bef3cc;
+  }
   .install-card pre {
+    flex: 1;
+    margin: 0;
+    padding: 18px 20px 20px;
+    border-radius: 0;
     white-space: pre-wrap;
-    word-break: break-all;
+    overflow-x: auto;
+    word-break: break-word;
     font-size: 12.5px;
+    line-height: 1.75;
   }
   .install-card p {
     margin: 0;
@@ -1115,4 +1202,48 @@ const faqs = [
     update();
     window.addEventListener("scroll", update, { passive: true });
   }
+
+  const fallbackCopy = (text) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "absolute";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const succeeded = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return succeeded;
+  };
+
+  const copyText = async (text) => {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    return fallbackCopy(text);
+  };
+
+  document.querySelectorAll("[data-copy-button]").forEach((button) => {
+    const originalText = button.textContent?.trim() || "复制";
+
+    button.addEventListener("click", async () => {
+      const text = button.getAttribute("data-copy");
+      if (!text) return;
+
+      try {
+        const copied = await copyText(text);
+        if (!copied) return;
+        button.dataset.copied = "true";
+        button.textContent = "已复制";
+        window.setTimeout(() => {
+          button.dataset.copied = "false";
+          button.textContent = originalText;
+        }, 1600);
+      } catch {
+        button.dataset.copied = "false";
+        button.textContent = originalText;
+      }
+    });
+  });
 </script>

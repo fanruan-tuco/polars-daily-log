@@ -82,7 +82,7 @@ class DailyWorkflow:
             )
 
     async def _submit_approved(self, target_date: str) -> None:
-        """Submit all approved/auto_approved daily drafts to Jira."""
+        """Submit all approved/auto_approved daily drafts via the configured publisher."""
         drafts = await self._db.fetch_all(
             "SELECT * FROM worklog_drafts WHERE date = ? AND status IN ('approved', 'auto_approved') AND tag = 'daily'",
             (target_date,),
@@ -90,53 +90,68 @@ class DailyWorkflow:
         if not drafts:
             return
 
-        from ..jira_client.client import MissingJiraConfig, build_jira_client_from_db
+        from ..publishers.registry import get_publisher
+        from ..jira_client.client import MissingJiraConfig
         try:
-            jira = await build_jira_client_from_db(self._db)
+            publisher = await get_publisher(self._db, "daily")
         except MissingJiraConfig:
-            # Scheduler runs in background — silent skip if Jira isn't set up yet.
+            # Scheduler runs in background — silent skip if not configured.
+            return
+        if publisher is None:
             return
 
         for draft in drafts:
             try:
-                # Jira started = {draft_date}T21:00 — record against the
-                # day the work happened, even for historical submissions.
                 started = f"{draft['date']}T21:00:00.000+0800"
 
-                # Parse issue entries from summary JSON
                 try:
                     issues = json.loads(draft["summary"])
                 except (json.JSONDecodeError, TypeError):
                     continue
 
                 _SKIP_KEYS = {"OTHER", "ALL", "DAILY"}
-                results = []
                 for i, issue in enumerate(issues):
                     if issue.get("jira_worklog_id"):
                         continue
                     if issue["issue_key"] in _SKIP_KEYS:
                         continue
                     time_sec = int(issue["time_spent_hours"] * 3600)
-                    result = await jira.submit_worklog(
+                    pub_result = await publisher.submit(
                         issue_key=issue["issue_key"],
                         time_spent_sec=time_sec,
                         comment=issue["summary"],
                         started=started,
                     )
-                    issues[i]["jira_worklog_id"] = str(result.get("id", ""))
-                    results.append(result)
+                    if pub_result.success:
+                        issues[i]["jira_worklog_id"] = pub_result.worklog_id
+                        await self._db.execute(
+                            "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
+                            "VALUES (?, 'submitted_issue', ?, ?, ?, 'auto')",
+                            (draft["id"],
+                             json.dumps({"issue_key": issue["issue_key"], "result": pub_result.raw}, ensure_ascii=False),
+                             i, issue["issue_key"]),
+                        )
+                    else:
+                        await self._db.execute(
+                            "INSERT INTO audit_logs (draft_id, action, jira_response, issue_index, issue_key, source) "
+                            "VALUES (?, 'submit_failed_issue', ?, ?, ?, 'auto')",
+                            (draft["id"],
+                             json.dumps({"issue_key": issue["issue_key"], "error": pub_result.error}, ensure_ascii=False),
+                             i, issue["issue_key"]),
+                        )
 
-                await self._db.execute(
-                    "UPDATE worklog_drafts SET summary = ?, status = 'submitted', updated_at = datetime('now') WHERE id = ?",
-                    (json.dumps(issues, ensure_ascii=False), draft["id"]),
+                all_done = all(
+                    iss.get("jira_worklog_id") or iss["issue_key"] in _SKIP_KEYS
+                    for iss in issues
                 )
+                new_status = "submitted" if all_done else draft["status"]
                 await self._db.execute(
-                    "INSERT INTO audit_logs (draft_id, action, jira_response) VALUES (?, 'submitted', ?)",
-                    (draft["id"], json.dumps(results, ensure_ascii=False)),
+                    "UPDATE worklog_drafts SET summary = ?, status = ?, updated_at = datetime('now') WHERE id = ?",
+                    (json.dumps(issues, ensure_ascii=False), new_status, draft["id"]),
                 )
             except Exception as e:
                 await self._db.execute(
-                    "INSERT INTO audit_logs (draft_id, action, after_snapshot) VALUES (?, 'submit_failed', ?)",
+                    "INSERT INTO audit_logs (draft_id, action, after_snapshot, source) VALUES (?, 'submit_failed', ?, 'auto')",
                     (draft["id"], str(e)),
                 )
 
