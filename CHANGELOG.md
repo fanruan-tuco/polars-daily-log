@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.6] — 2026-04-18
+
+安装脚本最终稳定 + 前端修复。
+
+### Fixed
+- **install.sh set -e 杀脚本**：`[[ false ]] && cmd` 和 `[[ -z non-empty ]] && cmd` 在 set -e 下返回 1 直接退出。选 server/collector 必崩，tty_read 读到输入也崩。全部改为 if/then
+- **MyLogs "全部" 显示空**：切到全部时 selectedDate 没清空，API 带着今天日期查 → 0 条
+- **scopeLabel 乱码**：monthly 的 emoji 被编码损坏（📅→◆◆），改为纯文本"每月"
+- **collector.yaml 生成静默失败**：去掉 2>/dev/null，加文件存在验证
+
+---
+
 ## [0.5.5] — 2026-04-17
 
 Hotfix: `curl | bash` 交互 prompt 修复。
