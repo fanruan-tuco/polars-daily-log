@@ -398,7 +398,10 @@ onMounted(loadData)
 /* ───── Row 1: Stat cards ───── */
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* minmax(0, 1fr) — without the 0, 1fr defaults to minmax(auto, 1fr) and
+     columns refuse to shrink below their content min-width, causing overflow
+     when the viewport is narrower than the sum of all cards' intrinsic size. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 24px;
 }
@@ -449,7 +452,9 @@ onMounted(loadData)
 /* ───── Row 2: split ───── */
 .split-row {
   display: grid;
-  grid-template-columns: 1.2fr 1fr;
+  /* Same minmax(0, ...) trick — without it the timeline card's intrinsic
+     content width keeps both columns from shrinking, causing overflow. */
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
   gap: 20px;
   margin-bottom: 24px;
 }
@@ -673,13 +678,15 @@ onMounted(loadData)
   color: var(--ink-muted);
 }
 
-/* ───── Responsive: sidebar layout gives ~1200px max ───── */
-@media (max-width: 1100px) {
+/* ───── Responsive ───── */
+/* Below ~1280px the 4 stat cards start looking cramped even though they
+   technically fit — drop to 2×2 for readability. Split row also stacks. */
+@media (max-width: 1280px) {
   .stats-row {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .split-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

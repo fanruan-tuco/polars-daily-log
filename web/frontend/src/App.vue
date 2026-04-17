@@ -22,13 +22,13 @@
     <aside class="sidebar" @click.self="mobileOpen = false">
       <div class="sidebar-inner">
         <!-- Brand -->
-        <router-link to="/" class="brand" @click="mobileOpen = false">
+        <a href="https://conner2077.github.io/polars-daily-log/" target="_blank" rel="noopener" class="brand">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="12" cy="12" r="10" stroke="var(--ink)" stroke-width="1.4" opacity="0.3" />
             <circle cx="12" cy="12" r="5" fill="var(--ink)" />
           </svg>
           <span class="brand-name">Polars Daily Log</span>
-        </router-link>
+        </a>
 
         <!-- NAVIGATION -->
         <div class="section-label">NAVIGATION</div>
@@ -470,6 +470,12 @@ onBeforeUnmount(() => {
   height: 28px;
   margin-bottom: 28px;
   flex-shrink: 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.brand:hover {
+  opacity: 0.6;
 }
 
 .brand-name {
