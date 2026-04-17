@@ -13,6 +13,14 @@ reviews:
   changed_files_summary: true
   sequence_diagrams: false
 
+  # Relax pre-merge checks — this is a personal tool, not enterprise software.
+  # Don't block contributors on docstring coverage or description boilerplate.
+  pre_merge_checks:
+    docstring_coverage:
+      enabled: false
+    description_check:
+      enabled: false
+
   auto_review:
     enabled: true
     drafts: false
