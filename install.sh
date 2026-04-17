@@ -56,7 +56,7 @@ tty_read() {
         # stdin is a pipe but /dev/tty exists — try it.
         read -rp "$prompt" REPLY < /dev/tty 2>/dev/null || REPLY=""
     fi
-    [[ -z "$REPLY" ]] && REPLY="$default"
+    if [[ -z "$REPLY" ]]; then REPLY="$default"; fi
 }
 
 # ─── Resolve role (server / collector / both) ───────────────────────
