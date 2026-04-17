@@ -43,6 +43,13 @@ exclude = ["tests*", "docs*", "web*", "scripts*"]
 [tool.setuptools.package-data]
 auto_daily_log = ["frontend_dist/**/*"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+markers = [
+    "slow: real install tests (build wheel + pip install, use --run-slow to include)",
+]
+addopts = "-m 'not slow'"
+
 [project.scripts]
 auto-daily-log = "auto_daily_log.__main__:main"
 auto-daily-log-collector = "auto_daily_log_collector.__main__:main"
