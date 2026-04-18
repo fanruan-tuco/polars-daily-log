@@ -25,41 +25,18 @@ A personal, local-first work-activity aggregator. It silently tracks foreground 
 
 ## Features
 
-### Dashboard — your day at a glance
-
-Work hours, activity count, pending logs, submitted worklogs, activity timeline, and recent activity list.
-
 <img src="docs/screenshots/dashboard.png" width="800" alt="Dashboard"/>
 
-### Activities — every foreground event
+| Page | What it does |
+|------|-------------|
+| **Dashboard** | Today's work hours, activity count, timeline, pending logs |
+| **Activities** | Browse all captured foreground windows, URLs, LLM summaries, screenshots |
+| **MyLog** | View / edit / push daily, weekly, monthly, quarterly summaries |
+| **Chat** | AI Q&A — ask about your week, draft timesheets, export conversations |
+| **Issues** | Manage active Jira Issues for per-issue worklog splitting |
+| **Settings** | LLM engines, Git repos, Jira, Prompts, scopes & outputs, privacy, auto-update |
 
-Browse all captured foreground windows, URLs, and LLM summaries by date. Filter by device or category. Includes screenshot thumbnails.
-
-<img src="docs/screenshots/activities.png" width="800" alt="Activities"/>
-
-### MyLog — generated summaries
-
-View daily / weekly / monthly / quarterly logs grouped by date and output type. Edit, push to Jira or Webhook, or delete.
-
-<img src="docs/screenshots/my-logs.png" width="800" alt="MyLog"/>
-
-### Chat — talk to your logs
-
-AI Q&A based on the last 7 days of work logs and activities. Ask "what did I do this week?" or "draft a timesheet for me". Export conversation history.
-
-<img src="docs/screenshots/chat.png" width="800" alt="Chat"/>
-
-### Issues — Jira task management
-
-Manage active Jira Issues for per_issue mode (split worklogs by task).
-
-<img src="docs/screenshots/issues.png" width="800" alt="Issues"/>
-
-### Settings — everything in one place
-
-Profile, activity collection, Git repos, Jira connection, LLM engines, Prompt templates, collector nodes, scopes & outputs, recycle bin, run history, auto-update.
-
-<img src="docs/screenshots/settings.png" width="800" alt="Settings"/>
+For detailed usage with screenshots, see the [Usage Guide](docs/usage-guide.md).
 
 ---
 

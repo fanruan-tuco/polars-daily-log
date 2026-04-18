@@ -25,41 +25,18 @@
 
 ## 功能一览
 
-### 概览 — 一页看完今天
-
-工作时长、活动条数、待审批日志、已推送工时，以及活动时间轴和最近活动列表。
-
 <img src="docs/screenshots/dashboard.png" width="800" alt="Dashboard"/>
 
-### 活动记录 — 每一条前台活动
+| 页面 | 功能 |
+|------|------|
+| **概览** | 今日工作时长、活动条数、时间轴、待审批日志 |
+| **活动记录** | 浏览所有前台窗口、URL、LLM 摘要、截图 |
+| **MyLog** | 查看 / 编辑 / 推送每日、每周、每月、每季度日志 |
+| **Chat** | 智能问答 — 问"我这周干了什么"、"帮我整理工时"、导出对话 |
+| **Issues** | 管理活跃的 Jira Issue，用于按任务拆分工时 |
+| **设置** | LLM 引擎、Git 仓库、Jira、Prompt、总结周期与输出、隐私、自动更新 |
 
-按日期浏览所有采集到的前台窗口、URL、LLM 摘要，支持按日期/设备/分类筛选，带截图缩略图。
-
-<img src="docs/screenshots/activities.png" width="800" alt="Activities"/>
-
-### MyLog — 生成的日志
-
-查看每天/每周/每月/每季度生成的日志，按日期和输出类型分组。支持手动编辑、推送到 Jira 或 Webhook、删除。
-
-<img src="docs/screenshots/my-logs.png" width="800" alt="MyLog"/>
-
-### Chat — 和你的日志对话
-
-基于最近 7 天的工作日志和活动的智能问答。可以问"我这周干了什么"、"帮我整理为工时草稿"等。支持导出对话。
-
-<img src="docs/screenshots/chat.png" width="800" alt="Chat"/>
-
-### Issues — Jira 任务管理
-
-管理活跃的 Jira Issue，用于 per_issue 模式（按任务拆分工时日志）。
-
-<img src="docs/screenshots/issues.png" width="800" alt="Issues"/>
-
-### 设置 — 所有配置集中管理
-
-个人资料、活动采集、Git 仓库、Jira 连接、LLM 引擎、Prompt 模板、数据采集节点、总结周期与输出、回收站、运行记录、自动更新。
-
-<img src="docs/screenshots/settings.png" width="800" alt="Settings"/>
+详细功能说明和使用截图见 [使用指南](docs/usage-guide.md)。
 
 ---
 
