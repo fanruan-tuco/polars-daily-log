@@ -211,7 +211,7 @@ async def check_llm_key(body: LLMCheckRequest):
                 resp = await client.post(
                     f"{base_url}/chat/completions",
                     headers={"Authorization": f"Bearer {body.api_key}", "Content-Type": "application/json"},
-                    json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+                    json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1, "stream": True},
                 )
 
             if resp.status_code == 200:
