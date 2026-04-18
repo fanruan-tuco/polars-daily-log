@@ -76,7 +76,12 @@ class OutputUpdate(BaseModel):
 async def list_scopes(request: Request):
     db = request.app.state.db
     scopes = await db.fetch_all(
-        "SELECT * FROM summary_types ORDER BY is_builtin DESC, name"
+        "SELECT * FROM summary_types ORDER BY is_builtin DESC, "
+        "CASE WHEN scope_rule LIKE '%day%' THEN 1 "
+        "WHEN scope_rule LIKE '%week%' THEN 2 "
+        "WHEN scope_rule LIKE '%month%' THEN 3 "
+        "WHEN scope_rule LIKE '%quarter%' THEN 4 "
+        "ELSE 5 END, name"
     )
     result = []
     for s in scopes:
