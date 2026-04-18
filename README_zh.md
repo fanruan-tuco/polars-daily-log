@@ -177,9 +177,9 @@ Get-ScheduledTaskInfo -TaskName AutoDailyLogCollector
 
 > **手动 vs 自动**："定时生成后自动推送"仅在 scheduler 按 cron 定时生成日志时触发。在 UI 中手动点"生成"**不会**自动推送——需要在生成的 summary 上手动点推送按钮。
 
-### 反馈 bug
+### 反馈
 
-Web UI 右上角 💡 按钮 — 写几句就行，后台自动附当前页面 + UA 发给开发者。
+左侧导航栏点**"反馈"** — 选类型（Bug / 建议 / 其他），写几句提交即可。后台自动附当前页面 URL 和浏览器 UA。
 
 ---
 

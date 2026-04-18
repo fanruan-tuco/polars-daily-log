@@ -178,9 +178,9 @@ Besides Jira, you can push daily logs to group chats via webhook — WeChat Work
 
 > **Manual vs auto**: "Auto-push after scheduled generation" only triggers when the scheduler generates logs on its cron schedule. Manually clicking "Generate" in the UI will **not** auto-push — use the push button on the generated summary instead.
 
-### Report a bug
+### Feedback
 
-Click the 💡 button in the top-right of the Web UI. Write a few words; it automatically attaches the current page + UA and sends it to the developer.
+Click **"反馈"** in the left sidebar — pick a type (Bug / Suggestion / Other), write a few words and submit. The current page URL and browser UA are attached automatically.
 
 ---
 
