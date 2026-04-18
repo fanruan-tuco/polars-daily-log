@@ -897,10 +897,12 @@ async def test_suggestions_surfaces_mentioned_issue_key(app_client):
         "INSERT INTO jira_issues (issue_key, summary, is_active) VALUES (?, ?, 1)",
         ("PDL-99", "Chat phase 4"),
     )
+    from datetime import date
+    today_iso = date.today().isoformat()
     await db.execute(
         "INSERT INTO activities (timestamp, app_name, category, llm_summary, duration_sec, machine_id) "
-        "VALUES (datetime('now'), 'VSCode', 'coding', ?, 60, 'local')",
-        ("在 PDL-99 的 chat.py 里加 suggestions 端点",),
+        "VALUES (?, 'VSCode', 'coding', ?, 60, 'local')",
+        (f"{today_iso} 10:00:00", "在 PDL-99 的 chat.py 里加 suggestions 端点"),
     )
 
     resp = await app_client.get("/api/chat/suggestions")
@@ -974,6 +976,8 @@ async def test_suggestions_caps_at_five_chips(app_client):
     # 3 active issues all mentioned in recent activities: triggers chip (1)
     # up to 2 issue-specific chips, (2) today-activities, (4) ≥3 unique → 总分类,
     # plus always-on fallback. 5 total is the expected cap.
+    from datetime import date
+    today_iso = date.today().isoformat()
     for key in ["PDL-1", "PDL-2", "PDL-3"]:
         await db.execute(
             "INSERT INTO jira_issues (issue_key, summary, is_active) VALUES (?, ?, 1)",
@@ -981,8 +985,8 @@ async def test_suggestions_caps_at_five_chips(app_client):
         )
         await db.execute(
             "INSERT INTO activities (timestamp, app_name, category, llm_summary, duration_sec, machine_id) "
-            "VALUES (datetime('now'), 'VSCode', 'coding', ?, 60, 'local')",
-            (f"Working on {key}",),
+            "VALUES (?, 'VSCode', 'coding', ?, 60, 'local')",
+            (f"{today_iso} 10:00:00", f"Working on {key}"),
         )
     resp = await app_client.get("/api/chat/suggestions")
     assert resp.status_code == 200

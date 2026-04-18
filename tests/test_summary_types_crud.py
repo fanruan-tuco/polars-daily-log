@@ -186,8 +186,8 @@ async def test_webhook_wecom_format_body():
     pub = WebhookPublisher({"url": "https://qyapi.weixin.qq.com/hook", "format": "wecom"})
     body = pub._build_body(issue_key="PLS-2", time_spent_sec=7200, comment="review", started="2026-04-17T21:00")
     assert body == {
-        "msgtype": "text",
-        "text": {"content": "[PLS-2] 2.0h — review"},
+        "msgtype": "markdown",
+        "markdown": {"content": "[PLS-2] 2.0h — review"},
     }
 
 
@@ -219,6 +219,7 @@ async def test_webhook_submit_success(httpx_mock):
     fake_response = MagicMock()
     fake_response.status_code = 200
     fake_response.text = '{"ok":true}'
+    fake_response.json.return_value = {"ok": True}
 
     with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=fake_response)):
         result = await pub.submit(issue_key="X-1", time_spent_sec=3600, comment="test", started="2026-04-17T21:00")

@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.6.0] — 2026-04-19
+
+多引擎 LLM、Webhook 推送、季报、文档全面升级。
+
+### Added
+- **多引擎 LLM + per-output 路由**：不同输出可使用不同 LLM 引擎（Kimi/OpenAI/Claude/自定义），砍掉 OTHER 分类桶
+- **Webhook 推送**：支持企业微信（markdown 格式）、飞书、Slack、通用 JSON，Settings 新增消息格式选择器
+- **季报 + scope 去重**：新增 quarterly 周期，同周期重复生成自动覆盖
+- **使用指南**：新增 `docs/usage-guide.md`，含全页面截图（demo 数据）和详细操作说明
+- **README 重写**：功能表格 + Dashboard 截图 + 核心功能说明，中英文同步
+
+### Changed
+- **推送方式语义**："生成后自动推送"改为"定时生成后自动推送"——手动生成不再触发自动推送，仅 scheduler 定时生成时触发
+- **推送逻辑统一**：手动推送和自动推送合并为 `_publish_summary()` 单一实现
+
+### Fixed
+- **Webhook errcode 误判**：企微/飞书 API 返回 HTTP 200 但 body 含 errcode，现在正确检测并报错
+- **single 模式推送失败**：无 issue_key 的日志（原汁原味日志等）推送时被 issue_key 校验拦截，现在仅 Jira 推送才校验
+- **stream-only 代理兼容**：LLM generate() 统一用 stream 模式，兼容只支持 streaming 的代理
+- **pdl build release 早退**：release 模式下 `pdl build` 不再尝试前端构建，直接提示 `pdl server start`
+- **scope 排序**：scope 列表按 day→week→month→quarter 排序
+- **0h 隐藏**：summary 无 time_spent_sec 时不显示 "0h"
+
+---
+
 ## [0.5.6] — 2026-04-18
 
 安装脚本最终稳定 + 前端修复。
