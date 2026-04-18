@@ -420,6 +420,16 @@ do_build() {
         shift
     done
 
+    # Release/user mode: no source tree to build against. Frontend ships
+    # prebuilt in the wheel, Python installed from wheel (not editable).
+    # Detect via frontend sources (only dev clones carry web/frontend/src/).
+    if [[ ! -d "$SCRIPT_DIR/web/frontend/src" ]]; then
+        warn "Release mode detected — 'build' is a dev-only command."
+        info "To upgrade installed version, run: ./pdl update apply"
+        info "To check for updates,          run: ./pdl update check"
+        exit 0
+    fi
+
     [[ -d "$VENV_DIR" ]] || { err "Virtual env missing. Run './pdl install' first."; exit 1; }
     activate_venv
 
